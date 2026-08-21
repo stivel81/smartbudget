@@ -135,4 +135,65 @@ router.delete('/users/:id/admin', requireAuth, requireAdmin, async (req: AuthedR
   return res.status(200).json({ message: 'Admin access revoked' });
 });
 
+// Supabase's ban_duration has no explicit "forever" value — a very long
+// duration is the documented way to express a permanent-ish suspension.
+const PERMANENT_BAN_DURATION = '876000h'; // ~100 years
+
+// POST /api/v1/admin/users/:id/suspend — bans the user at the auth layer
+// (they can't get a session at all, not just blocked at our own routes).
+router.post('/users/:id/suspend', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  if (targetId === req.userId) {
+    return res.status(400).json({ error: 'You cannot suspend your own account', status: 400 });
+  }
+
+  const { data: target, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .eq('id', targetId)
+    .single();
+
+  if (fetchError || !target) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const { error } = await supabase.auth.admin.updateUserById(targetId, { ban_duration: PERMANENT_BAN_DURATION });
+
+  if (error) {
+    console.error('Failed to suspend user:', error);
+    return res.status(500).json({ error: 'Failed to suspend user', status: 500 });
+  }
+
+  await logAdminAction(req.userId as string, 'suspend_user', targetId, { email: target.email });
+
+  return res.status(200).json({ message: 'User suspended' });
+});
+
+// POST /api/v1/admin/users/:id/unsuspend
+router.post('/users/:id/unsuspend', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  const { data: target, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .eq('id', targetId)
+    .single();
+
+  if (fetchError || !target) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const { error } = await supabase.auth.admin.updateUserById(targetId, { ban_duration: 'none' });
+
+  if (error) {
+    console.error('Failed to unsuspend user:', error);
+    return res.status(500).json({ error: 'Failed to unsuspend user', status: 500 });
+  }
+
+  await logAdminAction(req.userId as string, 'unsuspend_user', targetId, { email: target.email });
+
+  return res.status(200).json({ message: 'User unsuspended' });
+});
+
 export default router;

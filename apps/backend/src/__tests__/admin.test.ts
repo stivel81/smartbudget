@@ -9,7 +9,7 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 }));
 
 import { app } from '../index';
-import { queueResult, resetQueue, mockGetUserById } from '../testUtils/supabaseMock';
+import { queueResult, resetQueue, mockGetUserById, mockUpdateUserById } from '../testUtils/supabaseMock';
 
 beforeEach(() => {
   resetQueue();
@@ -222,6 +222,91 @@ describe('DELETE /api/v1/admin/users/:id/admin (revoke)', () => {
 
     const response = await request(app)
       .delete('/api/v1/admin/users/user-456/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe('POST /api/v1/admin/users/:id/suspend', () => {
+  it('suspends the user and writes an audit log entry', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    mockUpdateUserById.mockResolvedValueOnce({ data: {}, error: null });
+    queueResult({ error: null }); // audit log insert
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/suspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateUserById).toHaveBeenCalledWith('user-456', { ban_duration: '876000h' });
+  });
+
+  it('returns 400 when an admin tries to suspend their own account', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-123/suspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(400);
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // fetch target
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/does-not-exist/suspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/suspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe('POST /api/v1/admin/users/:id/unsuspend', () => {
+  it('unsuspends the user and writes an audit log entry', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    mockUpdateUserById.mockResolvedValueOnce({ data: {}, error: null });
+    queueResult({ error: null }); // audit log insert
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/unsuspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateUserById).toHaveBeenCalledWith('user-456', { ban_duration: 'none' });
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // fetch target
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/does-not-exist/unsuspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/unsuspend')
       .set('Authorization', 'Bearer valid-token');
 
     expect(response.status).toBe(403);

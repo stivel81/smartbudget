@@ -138,6 +138,12 @@ router.post('/login', async (req: Request, res: Response) => {
           status: 401,
         });
       }
+      if ((error as { code?: string }).code === 'user_banned') {
+        return res.status(403).json({
+          error: 'This account has been suspended.',
+          status: 403,
+        });
+      }
       // Invalid credentials should return 401, not 400
       if (error.message.includes('Invalid login credentials') || error.status === 400) {
         return res.status(401).json({

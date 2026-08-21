@@ -6,12 +6,14 @@ import {
   getUserReceipts,
   grantAdmin,
   revokeAdmin,
+  suspendUser,
+  unsuspendUser,
   AdminUserDetail,
   AdminUserStats,
   AdminBudget,
   AdminReceipt,
 } from '../../lib/api';
-import { buttonStyle, cardStyle, cellStyle, secondaryButtonStyle } from '../../lib/styles';
+import { buttonStyle, cardStyle, cellStyle, dangerButtonStyle, secondaryButtonStyle } from '../../lib/styles';
 
 export default function UserDetailView({
   accessToken,
@@ -71,6 +73,24 @@ export default function UserDetailView({
     }
   };
 
+  const handleToggleSuspend = async () => {
+    if (!user) return;
+    setActionError('');
+    setActionLoading(true);
+    try {
+      if (user.banned_until) {
+        await unsuspendUser(userId, accessToken);
+      } else {
+        await suspendUser(userId, accessToken);
+      }
+      await loadDetail();
+    } catch (err: any) {
+      setActionError(err.message || 'Action failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div>
       <button onClick={onBack} style={{ ...secondaryButtonStyle, marginBottom: 16 }}>
@@ -95,6 +115,13 @@ export default function UserDetailView({
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button onClick={handleToggleAdmin} disabled={actionLoading} style={buttonStyle}>
                 {actionLoading ? 'Working...' : user.is_admin ? 'Revoke admin access' : 'Grant admin access'}
+              </button>
+              <button
+                onClick={handleToggleSuspend}
+                disabled={actionLoading}
+                style={user.banned_until ? buttonStyle : dangerButtonStyle}
+              >
+                {actionLoading ? 'Working...' : user.banned_until ? 'Unsuspend' : 'Suspend'}
               </button>
             </div>
           </div>

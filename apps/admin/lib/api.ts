@@ -98,3 +98,11 @@ export function grantAdmin(userId: string, accessToken: string): Promise<void> {
 export function revokeAdmin(userId: string, accessToken: string): Promise<void> {
   return request(`/api/v1/admin/users/${userId}/admin`, accessToken, { method: 'DELETE' });
 }
+
+export function suspendUser(userId: string, accessToken: string): Promise<void> {
+  return request(`/api/v1/admin/users/${userId}/suspend`, accessToken, { method: 'POST' });
+}
+
+export function unsuspendUser(userId: string, accessToken: string): Promise<void> {
+  return request(`/api/v1/admin/users/${userId}/unsuspend`, accessToken, { method: 'POST' });
+}
