@@ -110,3 +110,14 @@ export function unsuspendUser(userId: string, accessToken: string): Promise<void
 export function deleteUserData(userId: string, accessToken: string): Promise<void> {
   return request(`/api/v1/admin/users/${userId}`, accessToken, { method: 'DELETE' });
 }
+
+export interface UserDataExport {
+  exportedAt: string;
+  profile: Record<string, unknown>;
+  receipts: unknown[];
+  budgets: unknown[];
+}
+
+export function exportUserData(userId: string, accessToken: string): Promise<UserDataExport> {
+  return request(`/api/v1/admin/users/${userId}/export`, accessToken);
+}

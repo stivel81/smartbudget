@@ -260,4 +260,39 @@ router.delete('/users/:id', requireAuth, requireAdmin, async (req: AuthedRequest
   return res.status(200).json({ message: 'User data deleted' });
 });
 
+// GET /api/v1/admin/users/:id/export — GDPR data portability: a JSON dump
+// of everything this user's account holds.
+router.get('/users/:id/export', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', targetId)
+    .single();
+
+  if (profileError || !profile) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const [{ data: receipts, error: receiptsError }, { data: budgets, error: budgetsError }] = await Promise.all([
+    supabase.from('receipts').select('*').eq('user_id', targetId).order('created_at', { ascending: false }),
+    supabase.from('budgets').select('*').eq('user_id', targetId).order('category'),
+  ]);
+
+  if (receiptsError || budgetsError) {
+    console.error('Failed to export user data:', receiptsError || budgetsError);
+    return res.status(500).json({ error: 'Failed to export user data', status: 500 });
+  }
+
+  await logAdminAction(req.userId as string, 'export_user_data', targetId, { email: profile.email });
+
+  return res.status(200).json({
+    exportedAt: new Date().toISOString(),
+    profile,
+    receipts: receipts ?? [],
+    budgets: budgets ?? [],
+  });
+});
+
 export default router;

@@ -9,6 +9,7 @@ import {
   suspendUser,
   unsuspendUser,
   deleteUserData,
+  exportUserData,
   AdminUserDetail,
   AdminUserStats,
   AdminBudget,
@@ -85,6 +86,28 @@ export default function UserDetailView({
     }
   };
 
+  const handleExport = async () => {
+    if (!user) return;
+    setActionError('');
+    setActionLoading(true);
+    try {
+      const data = await exportUserData(userId, accessToken);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${user.email || userId}-export.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setActionError(err.message || 'Export failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleToggleSuspend = async () => {
     if (!user) return;
     setActionError('');
@@ -147,6 +170,9 @@ export default function UserDetailView({
                 style={user.banned_until ? buttonStyle : dangerButtonStyle}
               >
                 {actionLoading ? 'Working...' : user.banned_until ? 'Unsuspend' : 'Suspend'}
+              </button>
+              <button onClick={handleExport} disabled={actionLoading} style={secondaryButtonStyle}>
+                {actionLoading ? 'Working...' : 'Export data (GDPR)'}
               </button>
             </div>
           </div>

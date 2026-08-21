@@ -398,3 +398,44 @@ describe('DELETE /api/v1/admin/users/:id (right-to-erasure)', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /api/v1/admin/users/:id/export', () => {
+  it('returns a full data export and writes an audit log entry', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com', name: 'Target' }, error: null }); // profile select
+    queueResult({ data: [{ id: 'r1', raw_response: { merchant: 'Store', total: 10 } }], error: null }); // receipts select
+    queueResult({ data: [{ id: 'b1', category: 'Groceries', monthly_limit: 500 }], error: null }); // budgets select
+    queueResult({ error: null }); // audit log insert
+
+    const response = await request(app)
+      .get('/api/v1/admin/users/user-456/export')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.profile.email).toBe('target@b.com');
+    expect(response.body.receipts).toHaveLength(1);
+    expect(response.body.budgets).toHaveLength(1);
+    expect(response.body.exportedAt).toBeTruthy();
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // profile select
+
+    const response = await request(app)
+      .get('/api/v1/admin/users/does-not-exist/export')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .get('/api/v1/admin/users/user-456/export')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
