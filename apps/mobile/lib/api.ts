@@ -65,6 +65,26 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return response.json();
 }
 
+export async function refreshSession(refreshToken: string): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Session expired',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
 export interface ReceiptExtraction {
   merchant: string;
   total: number;

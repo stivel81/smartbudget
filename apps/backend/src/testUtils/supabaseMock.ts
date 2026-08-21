@@ -75,6 +75,7 @@ export const supabase = {
 // mockResolvedValueOnce rather than the queue pattern above.
 export const mockSignUp = jest.fn();
 export const mockSignInWithPassword = jest.fn();
+export const mockRefreshSession = jest.fn();
 export const mockAdminSignOut = jest.fn();
 
 export const supabaseAuth = {
@@ -82,6 +83,7 @@ export const supabaseAuth = {
     getUser: mockGetUser,
     signUp: mockSignUp,
     signInWithPassword: mockSignInWithPassword,
+    refreshSession: mockRefreshSession,
     admin: { signOut: mockAdminSignOut },
   },
 };
