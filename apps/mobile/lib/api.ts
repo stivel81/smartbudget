@@ -77,6 +77,7 @@ export interface Receipt {
   user_id: string;
   raw_response: ReceiptExtraction;
   created_at: string;
+  image_path: string | null;
 }
 
 export interface ScanReceiptResponse {
@@ -153,6 +154,25 @@ export async function updateReceipt(
   }
 
   return response.json();
+}
+
+export async function getReceiptImageUrl(id: string, accessToken: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}/image-url`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to load receipt image',
+      code: response.status,
+    } as ApiError;
+  }
+
+  const { url } = await response.json();
+  return url;
 }
 
 export async function deleteReceipt(id: string, accessToken: string): Promise<void> {

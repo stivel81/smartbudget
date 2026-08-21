@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '@smartbudget/shared/lib/supabase';
+import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
 
 export interface AuthedRequest extends Request {
   userId?: string;
@@ -12,7 +12,7 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   }
 
   const token = authHeader.substring(7);
-  const { data, error } = await supabase.auth.getUser(token);
+  const { data, error } = await supabaseAuth.auth.getUser(token);
 
   if (error || !data.user) {
     return res.status(401).json({ error: 'Invalid or expired token', status: 401 });

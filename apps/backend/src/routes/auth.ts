@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '@smartbudget/shared/lib/supabase';
+import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
 
 const router = Router();
 
@@ -52,7 +52,7 @@ router.post('/signup', async (req: Request, res: Response) => {
 
   try {
     // Create user with Supabase auth using admin API for auto-confirmation (MVP)
-    const { data, error } = await supabase.auth.admin.createUser({
+    const { data, error } = await supabaseAuth.auth.admin.createUser({
       email,
       password,
       email_confirm: true, // Auto-confirm email for MVP
@@ -110,7 +110,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     // Authenticate user
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email,
       password,
     });
@@ -172,7 +172,7 @@ router.post('/logout', async (req: Request, res: Response) => {
   try {
     // Sign out the session using the access token
     // In Supabase v2 with service role, we can use admin.signOut
-    const { error } = await supabase.auth.admin.signOut(token);
+    const { error } = await supabaseAuth.auth.admin.signOut(token);
 
     if (error) {
       console.error('Logout error:', error);
