@@ -6,6 +6,7 @@ import { supabase } from '@smartbudget/shared/lib/supabase';
 import authRouter from './routes/auth';
 import receiptsRouter from './routes/receipts';
 import budgetsRouter from './routes/budgets';
+import adminRouter from './routes/admin';
 
 // Skip rate limiting under test by default, so the rest of the Jest suite
 // isn't request-count-sensitive. A dedicated rate-limit test opts back in
@@ -81,6 +82,9 @@ app.use('/api/v1/receipts', receiptsRouter);
 
 // Budget routes
 app.use('/api/v1/budgets', budgetsRouter);
+
+// Admin routes (read-only; gated by profiles.is_admin, see requireAdmin)
+app.use('/api/v1/admin', adminRouter);
 
 // Error handling middleware (must be last)
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
