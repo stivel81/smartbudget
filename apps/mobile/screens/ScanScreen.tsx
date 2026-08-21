@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
 import { AuthContext } from '../App';
+import { textDirectionStyle } from '../lib/rtl';
 
 // Claude resizes any image above this (long edge) before billing/processing
 // it, so uploading larger buys nothing — this is also the size we store.
@@ -387,7 +388,7 @@ export default function ScanScreen(): React.ReactElement {
             <View style={componentStyles.resultItem}>
               <Text style={componentStyles.resultLabel}>Merchant</Text>
               <TextInput
-                style={componentStyles.resultInput}
+                style={[componentStyles.resultInput, textDirectionStyle(editedMerchant)]}
                 value={editedMerchant}
                 onChangeText={setEditedMerchant}
                 editable={!confirming && !discarding}
@@ -574,7 +575,8 @@ const componentStyles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textPrimary,
     fontWeight: '600',
-    textAlign: 'right',
+    // textAlign/writingDirection applied dynamically via textDirectionStyle()
+    // based on the merchant name's actual script (Hebrew vs. Latin).
     flex: 1,
     marginLeft: 12,
     padding: 0,

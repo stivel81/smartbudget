@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getReceipts, getReceiptImageUrl, Receipt } from '../lib/api';
+import { textDirectionStyle } from '../lib/rtl';
 
 // Design tokens
 const COLORS = {
@@ -88,7 +89,9 @@ const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ rece
         <MaterialCommunityIcons name={meta.icon as any} size={20} color={meta.color} />
       </View>
       <View style={styles.receiptInfo}>
-        <Text style={styles.receiptMerchant}>{receipt.raw_response.merchant}</Text>
+        <Text style={[styles.receiptMerchant, textDirectionStyle(receipt.raw_response.merchant)]}>
+          {receipt.raw_response.merchant}
+        </Text>
         <Text style={styles.receiptDate}>{receipt.raw_response.date}</Text>
       </View>
       <Text style={styles.receiptAmount}>₪{receipt.raw_response.total.toFixed(2)}</Text>
@@ -133,7 +136,9 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
         <View style={styles.modalCard}>
           <View style={styles.modalHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalTitle}>{receipt.raw_response.merchant}</Text>
+              <Text style={[styles.modalTitle, textDirectionStyle(receipt.raw_response.merchant)]}>
+                {receipt.raw_response.merchant}
+              </Text>
               <Text style={styles.modalSubtitle}>
                 {receipt.raw_response.date} · ₪{receipt.raw_response.total.toFixed(2)}
               </Text>

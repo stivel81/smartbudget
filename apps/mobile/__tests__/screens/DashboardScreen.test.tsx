@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 jest.mock('@react-navigation/native', () => {
@@ -91,6 +92,39 @@ describe('DashboardScreen', () => {
     expect(screen.getByText('Cafe Aroma')).toBeTruthy();
     expect(screen.getByText('Groceries')).toBeTruthy();
     expect(screen.getByText('Dining')).toBeTruthy();
+  });
+
+  it('right-aligns a Hebrew merchant name but left-aligns an English one', async () => {
+    mockGetReceipts.mockResolvedValue({
+      receipts: [
+        {
+          id: 'r1',
+          user_id: 'u1',
+          created_at: '2026-01-01T00:00:00Z',
+          raw_response: { merchant: 'טיטניום בע"מ', total: 350, date: '2026-01-01', items: [] },
+        },
+        {
+          id: 'r2',
+          user_id: 'u1',
+          created_at: '2026-01-02T00:00:00Z',
+          raw_response: { merchant: 'Rami Levy', total: 100, date: '2026-01-02', items: [] },
+        },
+      ],
+    });
+
+    renderDashboard();
+
+    const hebrewMerchant = await screen.findByText('טיטניום בע"מ');
+    expect(StyleSheet.flatten(hebrewMerchant.props.style)).toMatchObject({
+      textAlign: 'right',
+      writingDirection: 'rtl',
+    });
+
+    const englishMerchant = screen.getByText('Rami Levy');
+    expect(StyleSheet.flatten(englishMerchant.props.style)).toMatchObject({
+      textAlign: 'left',
+      writingDirection: 'ltr',
+    });
   });
 
   it('shows an error message when the fetch fails', async () => {
