@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react';
 import {
   getUserDetail,
   getUserReceipts,
+  grantAdmin,
+  revokeAdmin,
   AdminUserDetail,
   AdminUserStats,
   AdminBudget,
   AdminReceipt,
 } from '../../lib/api';
-import { cardStyle, cellStyle, secondaryButtonStyle } from '../../lib/styles';
+import { buttonStyle, cardStyle, cellStyle, secondaryButtonStyle } from '../../lib/styles';
 
 export default function UserDetailView({
   accessToken,
@@ -26,28 +28,48 @@ export default function UserDetailView({
   const [receipts, setReceipts] = useState<AdminReceipt[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDetail = () => {
     setLoading(true);
-    Promise.all([getUserDetail(userId, accessToken), getUserReceipts(userId, accessToken)])
+    return Promise.all([getUserDetail(userId, accessToken), getUserReceipts(userId, accessToken)])
       .then(([detail, receiptsRes]) => {
-        if (cancelled) return;
         setUser(detail.user);
         setStats(detail.stats);
         setBudgets(detail.budgets);
         setReceipts(receiptsRes.receipts);
       })
       .catch((err: any) => {
-        if (!cancelled) setError(err.message || 'Failed to load user');
+        setError(err.message || 'Failed to load user');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+  };
+
+  useEffect(() => {
+    loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, accessToken]);
+
+  const handleToggleAdmin = async () => {
+    if (!user) return;
+    setActionError('');
+    setActionLoading(true);
+    try {
+      if (user.is_admin) {
+        await revokeAdmin(userId, accessToken);
+      } else {
+        await grantAdmin(userId, accessToken);
+      }
+      await loadDetail();
+    } catch (err: any) {
+      setActionError(err.message || 'Action failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -67,6 +89,14 @@ export default function UserDetailView({
             <p>Email verified: {user.email_confirmed_at ? 'Yes' : 'No'}</p>
             <p>Status: {user.banned_until ? `Suspended until ${new Date(user.banned_until).toLocaleString()}` : 'Active'}</p>
             <p>Admin: {user.is_admin ? 'Yes' : 'No'}</p>
+
+            {actionError && <p style={{ color: '#dc2626', fontSize: 14 }}>{actionError}</p>}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button onClick={handleToggleAdmin} disabled={actionLoading} style={buttonStyle}>
+                {actionLoading ? 'Working...' : user.is_admin ? 'Revoke admin access' : 'Grant admin access'}
+              </button>
+            </div>
           </div>
 
           <div style={cardStyle}>

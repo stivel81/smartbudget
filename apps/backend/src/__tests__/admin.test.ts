@@ -143,3 +143,87 @@ describe("GET /api/v1/admin/users/:id/receipts", () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('POST /api/v1/admin/users/:id/admin (grant)', () => {
+  it('grants admin and writes an audit log entry', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    queueResult({ error: null }); // update is_admin=true
+    queueResult({ error: null }); // audit log insert
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // fetch target
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/does-not-exist/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .post('/api/v1/admin/users/user-456/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe('DELETE /api/v1/admin/users/:id/admin (revoke)', () => {
+  it('revokes admin and writes an audit log entry', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    queueResult({ error: null }); // update is_admin=false
+    queueResult({ error: null }); // audit log insert
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+  });
+
+  it('returns 400 when an admin tries to revoke their own admin access', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+
+    // requireAuth's mock resolves 'valid-token' to user id 'user-123' —
+    // targeting that same id is a self-revoke attempt.
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-123/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(400);
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // fetch target
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/does-not-exist/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456/admin')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});

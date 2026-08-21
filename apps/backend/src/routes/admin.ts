@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { supabase } from '@smartbudget/shared/lib/supabase';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
 import { requireAdmin } from '../middleware/requireAdmin';
+import { logAdminAction } from '../services/auditLog';
 
 const router = Router();
 
@@ -76,6 +77,62 @@ router.get('/users/:id/receipts', requireAuth, requireAdmin, async (req: AuthedR
   }
 
   return res.status(200).json({ receipts: data });
+});
+
+// POST /api/v1/admin/users/:id/admin — grant admin access.
+router.post('/users/:id/admin', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  const { data: target, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .eq('id', targetId)
+    .single();
+
+  if (fetchError || !target) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const { error } = await supabase.from('profiles').update({ is_admin: true }).eq('id', targetId);
+
+  if (error) {
+    console.error('Failed to grant admin:', error);
+    return res.status(500).json({ error: 'Failed to grant admin access', status: 500 });
+  }
+
+  await logAdminAction(req.userId as string, 'grant_admin', targetId, { email: target.email });
+
+  return res.status(200).json({ message: 'Admin access granted' });
+});
+
+// DELETE /api/v1/admin/users/:id/admin — revoke admin access.
+router.delete('/users/:id/admin', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  if (targetId === req.userId) {
+    return res.status(400).json({ error: 'You cannot revoke your own admin access', status: 400 });
+  }
+
+  const { data: target, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .eq('id', targetId)
+    .single();
+
+  if (fetchError || !target) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const { error } = await supabase.from('profiles').update({ is_admin: false }).eq('id', targetId);
+
+  if (error) {
+    console.error('Failed to revoke admin:', error);
+    return res.status(500).json({ error: 'Failed to revoke admin access', status: 500 });
+  }
+
+  await logAdminAction(req.userId as string, 'revoke_admin', targetId, { email: target.email });
+
+  return res.status(200).json({ message: 'Admin access revoked' });
 });
 
 export default router;

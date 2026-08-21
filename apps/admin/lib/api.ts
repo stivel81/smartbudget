@@ -90,3 +90,11 @@ export interface AdminReceipt {
 export function getUserReceipts(userId: string, accessToken: string): Promise<{ receipts: AdminReceipt[] }> {
   return request(`/api/v1/admin/users/${userId}/receipts`, accessToken);
 }
+
+export function grantAdmin(userId: string, accessToken: string): Promise<void> {
+  return request(`/api/v1/admin/users/${userId}/admin`, accessToken, { method: 'POST' });
+}
+
+export function revokeAdmin(userId: string, accessToken: string): Promise<void> {
+  return request(`/api/v1/admin/users/${userId}/admin`, accessToken, { method: 'DELETE' });
+}
