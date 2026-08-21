@@ -62,13 +62,19 @@ export interface ReceiptExtraction {
   items: { name: string; amount: number; category: string }[];
 }
 
+export interface Receipt {
+  id: string;
+  user_id: string;
+  raw_response: ReceiptExtraction;
+  created_at: string;
+}
+
 export interface ScanReceiptResponse {
-  receipt: {
-    id: string;
-    user_id: string;
-    raw_response: ReceiptExtraction;
-    created_at: string;
-  };
+  receipt: Receipt;
+}
+
+export interface GetReceiptsResponse {
+  receipts: Receipt[];
 }
 
 export async function scanReceipt(
@@ -89,6 +95,24 @@ export async function scanReceipt(
     const error = await response.json();
     throw {
       message: error.error || 'Failed to scan receipt',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export async function getReceipts(accessToken: string): Promise<GetReceiptsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to load receipts',
       code: response.status,
     } as ApiError;
   }

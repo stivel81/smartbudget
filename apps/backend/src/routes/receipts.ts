@@ -48,4 +48,20 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
   }
 });
 
+// GET /api/v1/receipts
+router.get('/', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const { data, error } = await supabase
+    .from('receipts')
+    .select('*')
+    .eq('user_id', req.userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to fetch receipts:', error);
+    return res.status(500).json({ error: 'Failed to fetch receipts', status: 500 });
+  }
+
+  return res.status(200).json({ receipts: data });
+});
+
 export default router;

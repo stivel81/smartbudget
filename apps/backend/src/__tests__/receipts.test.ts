@@ -24,6 +24,21 @@ jest.mock('@smartbudget/shared/lib/supabase', () => ({
           })),
         })),
       })),
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          order: jest.fn(async () => ({
+            data: [
+              {
+                id: 'receipt-123',
+                user_id: 'user-123',
+                raw_response: { merchant: 'Test Store', total: 10, date: '2026-01-01', items: [] },
+                created_at: '2026-01-01T00:00:00Z',
+              },
+            ],
+            error: null,
+          })),
+        })),
+      })),
     })),
   },
 }));
@@ -64,6 +79,24 @@ describe('POST /api/v1/receipts/scan', () => {
     const response = await request(app)
       .post('/api/v1/receipts/scan')
       .send({ image: 'ZmFrZQ==', mediaType: 'image/jpeg' });
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe('GET /api/v1/receipts', () => {
+  it('returns the current user\'s receipts on the happy path', async () => {
+    const response = await request(app)
+      .get('/api/v1/receipts')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.receipts).toHaveLength(1);
+    expect(response.body.receipts[0].raw_response.merchant).toBe('Test Store');
+  });
+
+  it('returns 401 when Authorization header is missing', async () => {
+    const response = await request(app).get('/api/v1/receipts');
 
     expect(response.status).toBe(401);
   });
