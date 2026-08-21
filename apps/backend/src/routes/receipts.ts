@@ -7,6 +7,16 @@ const router = Router();
 
 const VALID_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+const RECEIPTS_BUCKET = 'receipts';
+const IMAGE_URL_TTL_SECONDS = 60 * 5;
+
+const EXTENSION_BY_MEDIA_TYPE: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
 interface ScanRequest {
   image?: string;
   mediaType?: string;
@@ -41,7 +51,31 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
       return res.status(500).json({ error: 'Failed to save receipt', status: 500 });
     }
 
-    return res.status(201).json({ receipt: data });
+    // Best-effort: the scan already succeeded, so a storage failure here
+    // shouldn't fail the request — the receipt just ends up without an image.
+    const imagePath = `${req.userId}/${data.id}.${EXTENSION_BY_MEDIA_TYPE[mediaType]}`;
+    const { error: uploadError } = await supabase.storage
+      .from(RECEIPTS_BUCKET)
+      .upload(imagePath, Buffer.from(image, 'base64'), { contentType: mediaType, upsert: true });
+
+    if (uploadError) {
+      console.error('Failed to upload receipt image:', uploadError);
+      return res.status(201).json({ receipt: data });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('receipts')
+      .update({ image_path: imagePath })
+      .eq('id', data.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('Failed to save receipt image path:', updateError);
+      return res.status(201).json({ receipt: data });
+    }
+
+    return res.status(201).json({ receipt: updated });
   } catch (err) {
     console.error('Receipt scan error:', err);
     return res.status(500).json({ error: 'Failed to analyze receipt', status: 500 });
@@ -121,8 +155,59 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
   return res.status(200).json({ receipt: data });
 });
 
-// DELETE /api/v1/receipts/:id
+// GET /api/v1/receipts/:id/image-url
+router.get('/:id/image-url', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const { data: receipt, error: fetchError } = await supabase
+    .from('receipts')
+    .select('image_path')
+    .eq('id', req.params.id)
+    .eq('user_id', req.userId)
+    .single();
+
+  if (fetchError || !receipt) {
+    return res.status(404).json({ error: 'Receipt not found', status: 404 });
+  }
+
+  if (!receipt.image_path) {
+    return res.status(404).json({ error: 'This receipt has no stored image', status: 404 });
+  }
+
+  const { data, error } = await supabase.storage
+    .from(RECEIPTS_BUCKET)
+    .createSignedUrl(receipt.image_path, IMAGE_URL_TTL_SECONDS);
+
+  if (error || !data) {
+    console.error('Failed to create signed image URL:', error);
+    return res.status(500).json({ error: 'Failed to load receipt image', status: 500 });
+  }
+
+  return res.status(200).json({ url: data.signedUrl });
+});
+
+// DELETE /api/v1/receipts/:id — also deletes the stored image (right-to-erasure)
 router.delete('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const { data: receipt, error: fetchError } = await supabase
+    .from('receipts')
+    .select('image_path')
+    .eq('id', req.params.id)
+    .eq('user_id', req.userId)
+    .single();
+
+  if (fetchError || !receipt) {
+    return res.status(404).json({ error: 'Receipt not found', status: 404 });
+  }
+
+  if (receipt.image_path) {
+    const { error: removeError } = await supabase.storage
+      .from(RECEIPTS_BUCKET)
+      .remove([receipt.image_path]);
+
+    if (removeError) {
+      console.error('Failed to delete receipt image:', removeError);
+      return res.status(500).json({ error: 'Failed to delete receipt image', status: 500 });
+    }
+  }
+
   const { error, count } = await supabase
     .from('receipts')
     .delete({ count: 'exact' })

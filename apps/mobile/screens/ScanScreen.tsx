@@ -13,8 +13,37 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
 import { AuthContext } from '../App';
+import { textDirectionStyle } from '../lib/rtl';
+
+// Claude resizes any image above this (long edge) before billing/processing
+// it, so uploading larger buys nothing — this is also the size we store.
+const MAX_IMAGE_DIMENSION = 1568;
+const IMAGE_COMPRESSION = 0.7;
+
+async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<string> {
+  const context = ImageManipulator.manipulate(asset.uri);
+  const longEdge = Math.max(asset.width, asset.height);
+  if (longEdge > MAX_IMAGE_DIMENSION) {
+    if (asset.width >= asset.height) {
+      context.resize({ width: MAX_IMAGE_DIMENSION });
+    } else {
+      context.resize({ height: MAX_IMAGE_DIMENSION });
+    }
+  }
+
+  const image = await context.renderAsync();
+  const result = await image.saveAsync({ format: SaveFormat.JPEG, compress: IMAGE_COMPRESSION, base64: true });
+  context.release();
+  image.release();
+
+  if (!result.base64) {
+    throw new Error('Failed to process image');
+  }
+  return result.base64;
+}
 
 const COLORS = {
   primary: '#1D9E75',
@@ -139,20 +168,15 @@ export default function ScanScreen(): React.ReactElement {
   };
 
   const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
-    if (!asset.base64) {
-      Alert.alert('Scan failed', 'Could not read the selected image.');
-      return;
-    }
     if (!auth.accessToken) {
       Alert.alert('Not signed in', 'Please sign in again to scan a receipt.');
       return;
     }
 
-    const mediaType = asset.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
-
     setLoading(true);
     try {
-      const { receipt } = await scanReceipt(asset.base64, mediaType, auth.accessToken);
+      const base64 = await resizeForUpload(asset);
+      const { receipt } = await scanReceipt(base64, 'image/jpeg', auth.accessToken);
       const extraction = receipt.raw_response;
       const categories = Array.from(new Set(extraction.items.map((item) => item.category)));
 
@@ -178,7 +202,6 @@ export default function ScanScreen(): React.ReactElement {
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      base64: true,
       quality: 0.7,
     });
 
@@ -196,7 +219,6 @@ export default function ScanScreen(): React.ReactElement {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      base64: true,
       quality: 0.7,
     });
 
@@ -366,7 +388,7 @@ export default function ScanScreen(): React.ReactElement {
             <View style={componentStyles.resultItem}>
               <Text style={componentStyles.resultLabel}>Merchant</Text>
               <TextInput
-                style={componentStyles.resultInput}
+                style={[componentStyles.resultInput, textDirectionStyle(editedMerchant)]}
                 value={editedMerchant}
                 onChangeText={setEditedMerchant}
                 editable={!confirming && !discarding}
@@ -553,7 +575,8 @@ const componentStyles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textPrimary,
     fontWeight: '600',
-    textAlign: 'right',
+    // textAlign/writingDirection applied dynamically via textDirectionStyle()
+    // based on the merchant name's actual script (Hebrew vs. Latin).
     flex: 1,
     marginLeft: 12,
     padding: 0,

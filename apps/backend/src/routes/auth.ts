@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '@smartbudget/shared/lib/supabase';
+import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
 
 const router = Router();
 
@@ -51,12 +51,14 @@ router.post('/signup', async (req: Request, res: Response) => {
   }
 
   try {
-    // Create user with Supabase auth using admin API for auto-confirmation (MVP)
-    const { data, error } = await supabase.auth.admin.createUser({
+    // Real signup: Supabase sends a confirmation email and the account
+    // can't log in until it's verified (Auth setting "Confirm email",
+    // on by default) — replaces the previous admin.createUser(email_confirm:
+    // true) auto-confirm shortcut.
+    const { data, error } = await supabaseAuth.auth.signUp({
       email,
       password,
-      email_confirm: true, // Auto-confirm email for MVP
-      user_metadata: { name },
+      options: { data: { name } },
     });
 
     if (error) {
@@ -69,6 +71,16 @@ router.post('/signup', async (req: Request, res: Response) => {
       }
       return res.status(400).json({
         error: error.message,
+        status: 400,
+      });
+    }
+
+    // Anti-enumeration behavior: signing up with an email that's already
+    // registered and confirmed returns 200 with a user that has no
+    // identities, rather than an error.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      return res.status(400).json({
+        error: 'Email already registered',
         status: 400,
       });
     }
@@ -110,12 +122,18 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     // Authenticate user
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
+      if (error.message.includes('Email not confirmed')) {
+        return res.status(401).json({
+          error: 'Please verify your email before signing in — check your inbox for the confirmation link.',
+          status: 401,
+        });
+      }
       // Invalid credentials should return 401, not 400
       if (error.message.includes('Invalid login credentials') || error.status === 400) {
         return res.status(401).json({
@@ -172,7 +190,7 @@ router.post('/logout', async (req: Request, res: Response) => {
   try {
     // Sign out the session using the access token
     // In Supabase v2 with service role, we can use admin.signOut
-    const { error } = await supabase.auth.admin.signOut(token);
+    const { error } = await supabaseAuth.auth.admin.signOut(token);
 
     if (error) {
       console.error('Logout error:', error);

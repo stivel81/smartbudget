@@ -4,6 +4,10 @@ jest.mock('@smartbudget/shared/lib/supabase', () => ({
   supabase: require('../testUtils/supabaseMock').supabase,
 }));
 
+jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
+  supabaseAuth: require('../testUtils/supabaseMock').supabaseAuth,
+}));
+
 jest.mock('../services/claude', () => ({
   RECEIPT_CATEGORIES: ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other'],
 }));

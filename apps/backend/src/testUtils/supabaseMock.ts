@@ -8,13 +8,19 @@
  */
 
 let resultQueue: any[] = [];
+let storageResultQueue: any[] = [];
 
 export function queueResult(result: unknown) {
   resultQueue.push(result);
 }
 
+export function queueStorageResult(result: unknown) {
+  storageResultQueue.push(result);
+}
+
 export function resetQueue() {
   resultQueue = [];
+  storageResultQueue = [];
 }
 
 function nextResult() {
@@ -22,6 +28,13 @@ function nextResult() {
     throw new Error('supabaseMock: no result queued for this call');
   }
   return resultQueue.shift();
+}
+
+function nextStorageResult() {
+  if (storageResultQueue.length === 0) {
+    throw new Error('supabaseMock: no storage result queued for this call');
+  }
+  return storageResultQueue.shift();
 }
 
 function makeBuilder(): any {
@@ -46,4 +59,29 @@ export const mockGetUser = jest.fn(async (token: string) => {
 export const supabase = {
   auth: { getUser: mockGetUser },
   from: jest.fn(() => makeBuilder()),
+  storage: {
+    from: jest.fn(() => ({
+      upload: jest.fn(async () => nextStorageResult()),
+      remove: jest.fn(async () => nextStorageResult()),
+      createSignedUrl: jest.fn(async () => nextStorageResult()),
+    })),
+  },
+};
+
+// requireAuth verifies bearer tokens, and routes/auth.ts signs up/in/out,
+// via a separate client instance (see packages/shared/lib/supabaseAuth.ts)
+// — mocked here too so routes under test resolve the same way regardless
+// of which client they use. Auth tests configure these per-test with
+// mockResolvedValueOnce rather than the queue pattern above.
+export const mockSignUp = jest.fn();
+export const mockSignInWithPassword = jest.fn();
+export const mockAdminSignOut = jest.fn();
+
+export const supabaseAuth = {
+  auth: {
+    getUser: mockGetUser,
+    signUp: mockSignUp,
+    signInWithPassword: mockSignInWithPassword,
+    admin: { signOut: mockAdminSignOut },
+  },
 };

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, NavigationProp } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logout as logoutApi } from './lib/api';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -72,6 +74,9 @@ export interface AuthContextType {
   setIsAuthenticated: (value: boolean) => void;
   accessToken: string | null;
   setAccessToken: (token: string | null) => void;
+  userEmail: string | null;
+  setUserEmail: (email: string | null) => void;
+  logout: () => Promise<void>;
 }
 
 export const AuthContext = React.createContext<AuthContextType>({
@@ -79,16 +84,94 @@ export const AuthContext = React.createContext<AuthContextType>({
   setIsAuthenticated: () => {},
   accessToken: null,
   setAccessToken: () => {},
+  userEmail: null,
+  setUserEmail: () => {},
+  logout: async () => {},
 });
+
+const STORAGE_KEY_TOKEN = '@smartbudget/accessToken';
+const STORAGE_KEY_EMAIL = '@smartbudget/userEmail';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(true);
+
+  // Restore a persisted session once on launch, so the app doesn't drop
+  // back to the login screen every time it's closed and reopened.
+  useEffect(() => {
+    (async () => {
+      try {
+        const [storedToken, storedEmail] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY_TOKEN),
+          AsyncStorage.getItem(STORAGE_KEY_EMAIL),
+        ]);
+        if (storedToken) {
+          setAccessToken(storedToken);
+          setUserEmail(storedEmail);
+          setIsAuthenticated(true);
+        }
+      } finally {
+        setIsRestoring(false);
+      }
+    })();
+  }, []);
+
+  // Keep storage in sync with auth state. Skipped until the initial restore
+  // finishes, so it can't race and immediately erase what was just loaded.
+  useEffect(() => {
+    if (isRestoring) return;
+    if (accessToken) {
+      AsyncStorage.setItem(STORAGE_KEY_TOKEN, accessToken);
+    } else {
+      AsyncStorage.removeItem(STORAGE_KEY_TOKEN);
+    }
+  }, [accessToken, isRestoring]);
+
+  useEffect(() => {
+    if (isRestoring) return;
+    if (userEmail) {
+      AsyncStorage.setItem(STORAGE_KEY_EMAIL, userEmail);
+    } else {
+      AsyncStorage.removeItem(STORAGE_KEY_EMAIL);
+    }
+  }, [userEmail, isRestoring]);
+
+  const logout = async () => {
+    if (accessToken) {
+      try {
+        await logoutApi(accessToken);
+      } catch {
+        // Best-effort — the token may already be expired/revoked server-side.
+        // Clear the local session regardless.
+      }
+    }
+    setAccessToken(null);
+    setUserEmail(null);
+    setIsAuthenticated(false);
+  };
+
+  if (isRestoring) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1 }}>
       <AuthContext.Provider
-        value={{ isAuthenticated, setIsAuthenticated, accessToken, setAccessToken }}
+        value={{
+          isAuthenticated,
+          setIsAuthenticated,
+          accessToken,
+          setAccessToken,
+          userEmail,
+          setUserEmail,
+          logout,
+        }}
       >
         <NavigationContainer>
           <Stack.Navigator

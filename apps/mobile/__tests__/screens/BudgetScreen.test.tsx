@@ -32,6 +32,9 @@ function renderBudget() {
         setIsAuthenticated: () => {},
         accessToken: 'test-token',
         setAccessToken: () => {},
+        userEmail: 'test@example.com',
+        setUserEmail: () => {},
+        logout: async () => {},
       }}
     >
       <BudgetScreen />
