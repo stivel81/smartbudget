@@ -3,12 +3,14 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { supabase } from '@smartbudget/shared/lib/supabase';
 import authRouter from './routes/auth';
+import receiptsRouter from './routes/receipts';
 
 export const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 app.use(cors());
-app.use(express.json());
+// Base64-encoded receipt photos are larger than Express's 100kb JSON default.
+app.use(express.json({ limit: '15mb' }));
 
 // Health check route
 app.get('/health', (_req: Request, res: Response) => {
@@ -22,6 +24,9 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
 
 // Auth routes
 app.use('/api/v1/auth', authRouter);
+
+// Receipt routes
+app.use('/api/v1/receipts', receiptsRouter);
 
 // Error handling middleware (must be last)
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

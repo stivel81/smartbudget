@@ -20,6 +20,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "SmartBudget needs camera access to scan your receipts.",
+          "photosPermission": "SmartBudget needs photo library access to select receipt photos."
+        }
+      ]
+    ]
   }
 }
