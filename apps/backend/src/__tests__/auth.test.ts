@@ -9,7 +9,12 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 }));
 
 import { app } from '../index';
-import { mockSignUp, mockSignInWithPassword, mockAdminSignOut } from '../testUtils/supabaseMock';
+import {
+  mockSignUp,
+  mockSignInWithPassword,
+  mockRefreshSession,
+  mockAdminSignOut,
+} from '../testUtils/supabaseMock';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -142,6 +147,50 @@ describe('POST /api/v1/auth/login', () => {
     const response = await request(app).post('/api/v1/auth/login').send({ email: 'a@b.com' });
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('POST /api/v1/auth/refresh', () => {
+  it('returns a new session on the happy path', async () => {
+    mockRefreshSession.mockResolvedValue({
+      data: {
+        session: { access_token: 'new-tok', refresh_token: 'new-ref' },
+        user: { id: 'user-1', email: 'a@b.com' },
+      },
+      error: null,
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refresh_token: 'old-ref' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.session).toEqual({
+      access_token: 'new-tok',
+      refresh_token: 'new-ref',
+      user: { id: 'user-1', email: 'a@b.com' },
+    });
+    expect(mockRefreshSession).toHaveBeenCalledWith({ refresh_token: 'old-ref' });
+  });
+
+  it('returns 401 for an invalid or expired refresh token', async () => {
+    mockRefreshSession.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: 'Invalid Refresh Token' },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refresh_token: 'expired-ref' });
+
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 400 when refresh_token is missing', async () => {
+    const response = await request(app).post('/api/v1/auth/refresh').send({});
+
+    expect(response.status).toBe(400);
+    expect(mockRefreshSession).not.toHaveBeenCalled();
   });
 });
 

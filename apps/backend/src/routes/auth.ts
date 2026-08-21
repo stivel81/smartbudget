@@ -24,6 +24,10 @@ interface LoginRequest {
   password?: string;
 }
 
+interface RefreshRequest {
+  refresh_token?: string;
+}
+
 // POST /api/v1/auth/signup
 router.post('/signup', async (req: Request, res: Response) => {
   const { email, password, name } = req.body as SignupRequest;
@@ -167,6 +171,50 @@ router.post('/login', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('Login error:', err);
+    return res.status(500).json({
+      error: 'Internal server error',
+      status: 500,
+    });
+  }
+});
+
+// POST /api/v1/auth/refresh — exchange a refresh token for a new session,
+// so the mobile app can silently renew an expired access token instead of
+// forcing a full re-login. Mobile never talks to Supabase directly, so this
+// wraps supabaseAuth.auth.refreshSession() the same way /login wraps
+// signInWithPassword().
+router.post('/refresh', async (req: Request, res: Response) => {
+  const { refresh_token } = req.body as RefreshRequest;
+
+  if (!refresh_token) {
+    return res.status(400).json({
+      error: 'Missing required field: refresh_token',
+      status: 400,
+    });
+  }
+
+  try {
+    const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token });
+
+    if (error || !data.session || !data.user) {
+      return res.status(401).json({
+        error: 'Invalid or expired refresh token',
+        status: 401,
+      });
+    }
+
+    return res.status(200).json({
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Refresh error:', err);
     return res.status(500).json({
       error: 'Internal server error',
       status: 500,

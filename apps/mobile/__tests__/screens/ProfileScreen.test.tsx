@@ -10,6 +10,8 @@ function renderProfile(overrides: Partial<AuthContextType> = {}) {
     setIsAuthenticated: () => {},
     accessToken: 'test-token',
     setAccessToken: () => {},
+    refreshToken: 'test-refresh-token',
+    setRefreshToken: () => {},
     userEmail: 'adrian@example.com',
     setUserEmail: () => {},
     logout: jest.fn(async () => {}),

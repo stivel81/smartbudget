@@ -12,7 +12,8 @@
     "verify:receipt-scan": "ts-node -r dotenv/config scripts/verify-receipt-scan.ts",
     "verify:receipt-image-storage": "ts-node -r dotenv/config scripts/verify-receipt-image-storage.ts",
     "verify:email-verification": "ts-node -r dotenv/config scripts/verify-email-verification.ts",
-    "verify:admin-users": "ts-node -r dotenv/config scripts/verify-admin-users.ts"
+    "verify:admin-users": "ts-node -r dotenv/config scripts/verify-admin-users.ts",
+    "verify:token-refresh": "ts-node -r dotenv/config scripts/verify-token-refresh.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
