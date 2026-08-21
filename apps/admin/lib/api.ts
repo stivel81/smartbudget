@@ -106,3 +106,7 @@ export function suspendUser(userId: string, accessToken: string): Promise<void> 
 export function unsuspendUser(userId: string, accessToken: string): Promise<void> {
   return request(`/api/v1/admin/users/${userId}/unsuspend`, accessToken, { method: 'POST' });
 }
+
+export function deleteUserData(userId: string, accessToken: string): Promise<void> {
+  return request(`/api/v1/admin/users/${userId}`, accessToken, { method: 'DELETE' });
+}

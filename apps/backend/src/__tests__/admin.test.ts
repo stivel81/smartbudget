@@ -9,7 +9,14 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 }));
 
 import { app } from '../index';
-import { queueResult, resetQueue, mockGetUserById, mockUpdateUserById } from '../testUtils/supabaseMock';
+import {
+  queueResult,
+  queueStorageResult,
+  resetQueue,
+  mockGetUserById,
+  mockUpdateUserById,
+  mockDeleteUserAdmin,
+} from '../testUtils/supabaseMock';
 
 beforeEach(() => {
   resetQueue();
@@ -307,6 +314,85 @@ describe('POST /api/v1/admin/users/:id/unsuspend', () => {
 
     const response = await request(app)
       .post('/api/v1/admin/users/user-456/unsuspend')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
+
+describe('DELETE /api/v1/admin/users/:id (right-to-erasure)', () => {
+  it('deletes a user with images: audit-logs, removes images, deletes the auth user', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    queueResult({ data: [{ image_path: 'user-456/r1.jpg' }, { image_path: null }], error: null }); // receipts select
+    queueResult({ error: null }); // audit log insert
+    queueStorageResult({ error: null }); // storage remove
+    mockDeleteUserAdmin.mockResolvedValueOnce({ data: {}, error: null });
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(mockDeleteUserAdmin).toHaveBeenCalledWith('user-456');
+  });
+
+  it('deletes a user with no images without touching storage', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    queueResult({ data: [], error: null }); // receipts select — none
+    queueResult({ error: null }); // audit log insert
+    mockDeleteUserAdmin.mockResolvedValueOnce({ data: {}, error: null });
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+  });
+
+  it('returns 400 when an admin tries to delete their own account', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-123')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(400);
+    expect(mockDeleteUserAdmin).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the target user does not exist', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'not found' } }); // fetch target
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/does-not-exist')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 500 and does not delete the auth user if image cleanup fails', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: { id: 'user-456', email: 'target@b.com' }, error: null }); // fetch target
+    queueResult({ data: [{ image_path: 'user-456/r1.jpg' }], error: null }); // receipts select
+    queueResult({ error: null }); // audit log insert
+    queueStorageResult({ error: { message: 'storage down' } }); // storage remove fails
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(500);
+    expect(mockDeleteUserAdmin).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .delete('/api/v1/admin/users/user-456')
       .set('Authorization', 'Bearer valid-token');
 
     expect(response.status).toBe(403);

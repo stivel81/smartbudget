@@ -8,12 +8,20 @@ import {
   revokeAdmin,
   suspendUser,
   unsuspendUser,
+  deleteUserData,
   AdminUserDetail,
   AdminUserStats,
   AdminBudget,
   AdminReceipt,
 } from '../../lib/api';
-import { buttonStyle, cardStyle, cellStyle, dangerButtonStyle, secondaryButtonStyle } from '../../lib/styles';
+import {
+  buttonStyle,
+  cardStyle,
+  cellStyle,
+  dangerButtonStyle,
+  inputStyle,
+  secondaryButtonStyle,
+} from '../../lib/styles';
 
 export default function UserDetailView({
   accessToken,
@@ -32,6 +40,10 @@ export default function UserDetailView({
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const loadDetail = () => {
     setLoading(true);
@@ -88,6 +100,19 @@ export default function UserDetailView({
       setActionError(err.message || 'Action failed');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!user || deleteConfirmText !== user.email) return;
+    setDeleteError('');
+    setDeleting(true);
+    try {
+      await deleteUserData(userId, accessToken);
+      onBack();
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete user data');
+      setDeleting(false);
     }
   };
 
@@ -164,6 +189,54 @@ export default function UserDetailView({
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+
+          <div style={{ ...cardStyle, borderColor: '#fca5a5' }}>
+            <h3 style={{ marginTop: 0, color: '#dc2626' }}>Danger zone</h3>
+            <p style={{ fontSize: 14 }}>
+              Permanently deletes this user's receipts (and stored photos), budgets, profile, and account.
+              This cannot be undone.
+            </p>
+
+            {!showDeleteConfirm ? (
+              <button onClick={() => setShowDeleteConfirm(true)} style={dangerButtonStyle}>
+                Delete all data
+              </button>
+            ) : (
+              <div>
+                <p style={{ fontSize: 14 }}>
+                  Type <strong>{user.email}</strong> to confirm:
+                </p>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  style={{ ...inputStyle, maxWidth: 320, marginBottom: 8 }}
+                  data-testid="delete-confirm-input"
+                />
+                {deleteError && <p style={{ color: '#dc2626', fontSize: 14 }}>{deleteError}</p>}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting || deleteConfirmText !== user.email}
+                    style={dangerButtonStyle}
+                  >
+                    {deleting ? 'Deleting...' : 'Confirm permanent deletion'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowDeleteConfirm(false);
+                      setDeleteConfirmText('');
+                      setDeleteError('');
+                    }}
+                    disabled={deleting}
+                    style={secondaryButtonStyle}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

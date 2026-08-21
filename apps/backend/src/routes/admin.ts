@@ -196,4 +196,68 @@ router.post('/users/:id/unsuspend', requireAuth, requireAdmin, async (req: Authe
   return res.status(200).json({ message: 'User unsuspended' });
 });
 
+// DELETE /api/v1/admin/users/:id — right-to-erasure: permanently deletes
+// the user's receipts (+ stored images), budgets, profile, and auth
+// account. Irreversible.
+router.delete('/users/:id', requireAuth, requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const targetId = String(req.params.id);
+
+  if (targetId === req.userId) {
+    return res.status(400).json({ error: 'You cannot delete your own account', status: 400 });
+  }
+
+  const { data: target, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id, email')
+    .eq('id', targetId)
+    .single();
+
+  if (fetchError || !target) {
+    return res.status(404).json({ error: 'User not found', status: 404 });
+  }
+
+  const { data: receipts, error: receiptsError } = await supabase
+    .from('receipts')
+    .select('image_path')
+    .eq('user_id', targetId);
+
+  if (receiptsError) {
+    console.error('Failed to fetch receipts before deletion:', receiptsError);
+    return res.status(500).json({ error: 'Failed to delete user data', status: 500 });
+  }
+
+  const imagePaths = (receipts ?? [])
+    .map((r: any) => r.image_path as string | null)
+    .filter((p): p is string => Boolean(p));
+
+  // Logged before the destructive steps run: target_user_id's ON DELETE
+  // SET NULL means this record survives the user being deleted, and if a
+  // later step fails partway, an audit trail showing the attempt was made
+  // is safer for a right-to-erasure action than silently under-logging it.
+  await logAdminAction(req.userId as string, 'delete_user_data', targetId, {
+    email: target.email,
+    receiptCount: receipts?.length ?? 0,
+    imagesDeleted: imagePaths.length,
+  });
+
+  if (imagePaths.length > 0) {
+    const { error: removeError } = await supabase.storage.from('receipts').remove(imagePaths);
+    if (removeError) {
+      console.error('Failed to delete receipt images:', removeError);
+      return res.status(500).json({ error: 'Failed to delete user data', status: 500 });
+    }
+  }
+
+  // Deleting the auth user cascades profiles, receipts, and budgets rows
+  // (all FK'd with ON DELETE CASCADE) at the database level.
+  const { error: deleteError } = await supabase.auth.admin.deleteUser(targetId);
+
+  if (deleteError) {
+    console.error('Failed to delete user:', deleteError);
+    return res.status(500).json({ error: 'Failed to delete user data', status: 500 });
+  }
+
+  return res.status(200).json({ message: 'User data deleted' });
+});
+
 export default router;

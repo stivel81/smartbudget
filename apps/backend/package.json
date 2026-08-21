@@ -17,7 +17,8 @@
     "verify:audit-log": "ts-node -r dotenv/config scripts/verify-audit-log.ts",
     "verify:admin-user-detail": "ts-node -r dotenv/config scripts/verify-admin-user-detail.ts",
     "verify:admin-grant-revoke": "ts-node -r dotenv/config scripts/verify-admin-grant-revoke.ts",
-    "verify:admin-suspend": "ts-node -r dotenv/config scripts/verify-admin-suspend.ts"
+    "verify:admin-suspend": "ts-node -r dotenv/config scripts/verify-admin-suspend.ts",
+    "verify:admin-delete-user": "ts-node -r dotenv/config scripts/verify-admin-delete-user.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
