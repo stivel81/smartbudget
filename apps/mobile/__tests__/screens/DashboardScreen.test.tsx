@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -14,8 +14,10 @@ jest.mock('@react-navigation/native', () => {
 });
 
 const mockGetReceipts = jest.fn();
+const mockGetReceiptImageUrl = jest.fn();
 jest.mock('../../lib/api', () => ({
   getReceipts: (...args: unknown[]) => mockGetReceipts(...args),
+  getReceiptImageUrl: (...args: unknown[]) => mockGetReceiptImageUrl(...args),
 }));
 
 import DashboardScreen from '../../screens/DashboardScreen';
@@ -97,5 +99,58 @@ describe('DashboardScreen', () => {
     renderDashboard();
 
     await waitFor(() => expect(screen.getByText('Failed to load receipts')).toBeTruthy());
+  });
+
+  describe('receipt image modal', () => {
+    const RECEIPT = {
+      id: 'r1',
+      user_id: 'u1',
+      created_at: '2026-01-02T00:00:00Z',
+      raw_response: {
+        merchant: 'Rami Levy',
+        total: 100,
+        date: '2026-01-02',
+        items: [{ name: 'Milk', amount: 60, category: 'Groceries' }],
+      },
+    };
+
+    it('opens the image modal on tap and shows the signed image URL', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [RECEIPT] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/signed-image.jpg');
+
+      renderDashboard();
+      await waitFor(() => expect(screen.getByTestId('receipt-item-r1')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('receipt-item-r1'));
+
+      await waitFor(() => expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token'));
+      await waitFor(() => expect(screen.getByTestId('receipt-modal-close')).toBeTruthy());
+    });
+
+    it('shows an error inside the modal when the receipt has no image', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [RECEIPT] });
+      mockGetReceiptImageUrl.mockRejectedValue({ message: 'This receipt has no stored image' });
+
+      renderDashboard();
+      await waitFor(() => expect(screen.getByTestId('receipt-item-r1')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('receipt-item-r1'));
+
+      await waitFor(() => expect(screen.getByText('This receipt has no stored image')).toBeTruthy());
+    });
+
+    it('closes the modal when the close button is pressed', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [RECEIPT] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/signed-image.jpg');
+
+      renderDashboard();
+      await waitFor(() => expect(screen.getByTestId('receipt-item-r1')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('receipt-item-r1'));
+      await waitFor(() => expect(screen.getByTestId('receipt-modal-close')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('receipt-modal-close'));
+
+      await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+    });
   });
 });

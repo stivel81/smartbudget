@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,12 +6,15 @@ import {
   ScrollView,
   SafeAreaView,
   ActivityIndicator,
+  Modal,
+  Image,
+  TouchableOpacity,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
-import { getReceipts, Receipt } from '../lib/api';
+import { getReceipts, getReceiptImageUrl, Receipt } from '../lib/api';
 
 // Design tokens
 const COLORS = {
@@ -75,12 +78,12 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number }> = ({
   );
 };
 
-const ReceiptItem: React.FC<{ receipt: Receipt }> = ({ receipt }) => {
+const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ receipt, onPress }) => {
   const primaryCategory = receipt.raw_response.items[0]?.category ?? 'Other';
   const meta = categoryMeta(primaryCategory);
 
   return (
-    <View style={styles.receiptItem}>
+    <TouchableOpacity style={styles.receiptItem} onPress={onPress} testID={`receipt-item-${receipt.id}`}>
       <View style={[styles.receiptIconContainer, { backgroundColor: meta.backgroundColor }]}>
         <MaterialCommunityIcons name={meta.icon as any} size={20} color={meta.color} />
       </View>
@@ -89,7 +92,67 @@ const ReceiptItem: React.FC<{ receipt: Receipt }> = ({ receipt }) => {
         <Text style={styles.receiptDate}>{receipt.raw_response.date}</Text>
       </View>
       <Text style={styles.receiptAmount}>₪{receipt.raw_response.total.toFixed(2)}</Text>
-    </View>
+    </TouchableOpacity>
+  );
+};
+
+const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClose: () => void }> = ({
+  receipt,
+  accessToken,
+  onClose,
+}) => {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setImageUrl(null);
+
+    getReceiptImageUrl(receipt.id, accessToken)
+      .then((url) => {
+        if (!cancelled) setImageUrl(url);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setError(err.message || 'No image available for this receipt');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [receipt.id, accessToken]);
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{receipt.raw_response.merchant}</Text>
+              <Text style={styles.modalSubtitle}>
+                {receipt.raw_response.date} · ₪{receipt.raw_response.total.toFixed(2)}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} testID="receipt-modal-close">
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalImageContainer}>
+            {loading && <ActivityIndicator color={COLORS.primary} />}
+            {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {!loading && imageUrl ? (
+              <Image source={{ uri: imageUrl }} style={styles.modalImage} resizeMode="contain" />
+            ) : null}
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 };
 
@@ -98,6 +161,7 @@ export default function DashboardScreen(): React.ReactElement {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -208,11 +272,19 @@ export default function DashboardScreen(): React.ReactElement {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Recent Receipts</Text>
             {receipts.slice(0, 5).map((receipt) => (
-              <ReceiptItem key={receipt.id} receipt={receipt} />
+              <ReceiptItem key={receipt.id} receipt={receipt} onPress={() => setSelectedReceipt(receipt)} />
             ))}
           </View>
         )}
       </ScrollView>
+
+      {selectedReceipt && auth.accessToken && (
+        <ReceiptImageModal
+          receipt={selectedReceipt}
+          accessToken={auth.accessToken}
+          onClose={() => setSelectedReceipt(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -402,5 +474,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.textPrimary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  modalImageContainer: {
+    minHeight: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalImage: {
+    width: '100%',
+    height: 320,
+    borderRadius: 8,
   },
 });
