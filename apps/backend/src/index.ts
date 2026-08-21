@@ -4,6 +4,7 @@ import cors from 'cors';
 import { supabase } from '@smartbudget/shared/lib/supabase';
 import authRouter from './routes/auth';
 import receiptsRouter from './routes/receipts';
+import budgetsRouter from './routes/budgets';
 
 export const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -27,6 +28,9 @@ app.use('/api/v1/auth', authRouter);
 
 // Receipt routes
 app.use('/api/v1/receipts', receiptsRouter);
+
+// Budget routes
+app.use('/api/v1/budgets', budgetsRouter);
 
 // Error handling middleware (must be last)
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

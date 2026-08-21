@@ -2,6 +2,19 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Must stay in sync with the category set in apps/mobile/screens/DashboardScreen.tsx,
+// which maps each of these to a fixed icon/color per docs/DESIGN_REFERENCE.md.
+export const RECEIPT_CATEGORIES = [
+  'Groceries',
+  'Dining',
+  'Transport',
+  'Entertainment',
+  'Health',
+  'Other',
+] as const;
+
+export type ReceiptCategory = (typeof RECEIPT_CATEGORIES)[number];
+
 const RECEIPT_SCHEMA = {
   type: 'object',
   properties: {
@@ -15,7 +28,7 @@ const RECEIPT_SCHEMA = {
         properties: {
           name: { type: 'string' },
           amount: { type: 'number' },
-          category: { type: 'string' },
+          category: { type: 'string', enum: [...RECEIPT_CATEGORIES] },
         },
         required: ['name', 'amount', 'category'],
         additionalProperties: false,
@@ -30,7 +43,7 @@ export interface ReceiptExtraction {
   merchant: string;
   total: number;
   date: string;
-  items: { name: string; amount: number; category: string }[];
+  items: { name: string; amount: number; category: ReceiptCategory }[];
 }
 
 export async function scanReceipt(
@@ -50,7 +63,7 @@ export async function scanReceipt(
           },
           {
             type: 'text',
-            text: 'Analyze this receipt image and return JSON only: merchant, total, date, and items (name, amount, category).',
+            text: `Analyze this receipt image and return JSON only: merchant, total, date, and items (name, amount, category). Each item's category must be one of: ${RECEIPT_CATEGORIES.join(', ')}. Use "Other" when nothing else fits.`,
           },
         ],
       },
