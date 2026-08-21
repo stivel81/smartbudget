@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,8 +7,13 @@ import {
   SafeAreaView,
   Animated,
   Dimensions,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { scanReceipt } from '../lib/api';
+import { AuthContext } from '../App';
 
 const COLORS = {
   primary: '#1D9E75',
@@ -86,6 +91,8 @@ const CornerGuide: React.FC<CornerGuideProps> = ({ position }) => {
 export default function ScanScreen(): React.ReactElement {
   const [showResult, setShowResult] = useState(false);
   const [result, setResult] = useState<AIResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const auth = useContext(AuthContext);
   const slideAnim = useRef(new Animated.Value(300)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
@@ -111,19 +118,8 @@ export default function ScanScreen(): React.ReactElement {
     return () => scanLineAnim.setValue(0);
   }, [scanLineAnim]);
 
-  const handleCapture = () => {
-    const mockResult: AIResult = {
-      merchant: 'Rami Levy',
-      category: 'Groceries',
-      date: new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      }),
-      total: 127.5,
-    };
-
-    setResult(mockResult);
+  const showResultCard = (result: AIResult) => {
+    setResult(result);
     setShowResult(true);
 
     // Animate result card sliding up
@@ -132,6 +128,72 @@ export default function ScanScreen(): React.ReactElement {
       duration: 300,
       useNativeDriver: false,
     }).start();
+  };
+
+  const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset.base64) {
+      Alert.alert('Scan failed', 'Could not read the selected image.');
+      return;
+    }
+    if (!auth.accessToken) {
+      Alert.alert('Not signed in', 'Please sign in again to scan a receipt.');
+      return;
+    }
+
+    const mediaType = asset.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+
+    setLoading(true);
+    try {
+      const { receipt } = await scanReceipt(asset.base64, mediaType, auth.accessToken);
+      const extraction = receipt.raw_response;
+      const categories = Array.from(new Set(extraction.items.map((item) => item.category)));
+
+      showResultCard({
+        merchant: extraction.merchant,
+        category: categories.length > 0 ? categories.join(', ') : 'Uncategorized',
+        date: extraction.date,
+        total: extraction.total,
+      });
+    } catch (err: any) {
+      Alert.alert('Scan failed', err.message || 'Could not analyze this receipt.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCapture = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Camera permission required', 'Enable camera access to scan a receipt.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      base64: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await processImage(result.assets[0]);
+    }
+  };
+
+  const handlePickFromGallery = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo library permission required', 'Enable photo access to select a receipt.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      base64: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await processImage(result.assets[0]);
+    }
   };
 
   const handleDismiss = () => {
@@ -177,9 +239,8 @@ export default function ScanScreen(): React.ReactElement {
       <View style={componentStyles.controls}>
         <TouchableOpacity
           style={componentStyles.controlButton}
-          onPress={() => {
-            /* Gallery picker would go here */
-          }}
+          onPress={handlePickFromGallery}
+          disabled={loading}
         >
           <MaterialCommunityIcons name="image" size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
@@ -187,8 +248,13 @@ export default function ScanScreen(): React.ReactElement {
         <TouchableOpacity
           style={componentStyles.captureButton}
           onPress={handleCapture}
+          disabled={loading}
         >
-          <View style={componentStyles.captureButtonInner} />
+          {loading ? (
+            <ActivityIndicator color="#ffffff" />
+          ) : (
+            <View style={componentStyles.captureButtonInner} />
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity

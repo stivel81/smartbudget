@@ -67,6 +67,7 @@ export default function LoginScreen({ navigation }: Props) {
     try {
       const result = await login(email, password);
       // On success, set authentication state
+      auth.setAccessToken(result.session.access_token);
       auth.setIsAuthenticated(true);
       // Navigate to the main app
       navigation.reset({

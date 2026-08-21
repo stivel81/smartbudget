@@ -58,6 +58,9 @@ supabase/.temp/
 .claude/scheduled_tasks.lock
 .claude/.DS_Store
 
+# Local test fixtures (personal photos, not for version control)
+test/impl/
+
 # Editor / OS
 .DS_Store
 .idea/
