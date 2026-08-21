@@ -70,19 +70,26 @@ function BottomTabNavigator() {
 export interface AuthContextType {
   isAuthenticated: boolean;
   setIsAuthenticated: (value: boolean) => void;
+  accessToken: string | null;
+  setAccessToken: (token: string | null) => void;
 }
 
 export const AuthContext = React.createContext<AuthContextType>({
   isAuthenticated: false,
   setIsAuthenticated: () => {},
+  accessToken: null,
+  setAccessToken: () => {},
 });
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   return (
     <View style={{ flex: 1 }}>
-      <AuthContext.Provider value={{ isAuthenticated, setIsAuthenticated }}>
+      <AuthContext.Provider
+        value={{ isAuthenticated, setIsAuthenticated, accessToken, setAccessToken }}
+      >
         <NavigationContainer>
           <Stack.Navigator
             screenOptions={{

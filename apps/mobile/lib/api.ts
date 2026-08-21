@@ -47,7 +47,48 @@ export async function login(email: string, password: string): Promise<LoginRespo
   if (!response.ok) {
     const error = await response.json();
     throw {
-      message: error.message || 'Invalid credentials',
+      message: error.error || 'Invalid credentials',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export interface ReceiptExtraction {
+  merchant: string;
+  total: number;
+  date: string;
+  items: { name: string; amount: number; category: string }[];
+}
+
+export interface ScanReceiptResponse {
+  receipt: {
+    id: string;
+    user_id: string;
+    raw_response: ReceiptExtraction;
+    created_at: string;
+  };
+}
+
+export async function scanReceipt(
+  base64Image: string,
+  mediaType: 'image/jpeg' | 'image/png',
+  accessToken: string
+): Promise<ScanReceiptResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/scan`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ image: base64Image, mediaType }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to scan receipt',
       code: response.status,
     } as ApiError;
   }
@@ -71,7 +112,7 @@ export async function signup(
   if (!response.ok) {
     const error = await response.json();
     throw {
-      message: error.message || 'Signup failed',
+      message: error.error || 'Signup failed',
       code: response.status,
     } as ApiError;
   }
