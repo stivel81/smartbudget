@@ -526,3 +526,38 @@ describe('GET /api/v1/admin/rate-limit-violations', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /api/v1/admin/failed-scans', () => {
+  it('returns recent failures for an admin caller', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [
+        {
+          id: 'f1',
+          user_id: 'user-456',
+          error_message: 'Claude timed out',
+          media_type: 'image/jpeg',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      error: null,
+    }); // failures select
+
+    const response = await request(app)
+      .get('/api/v1/admin/failed-scans')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.failures).toHaveLength(1);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .get('/api/v1/admin/failed-scans')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});

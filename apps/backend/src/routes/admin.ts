@@ -366,4 +366,20 @@ router.get('/rate-limit-violations', requireAuth, requireAdmin, async (_req: Aut
   return res.status(200).json({ violations: data });
 });
 
+// GET /api/v1/admin/failed-scans — recent Claude scan failures, newest first.
+router.get('/failed-scans', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
+  const { data, error } = await supabase
+    .from('scan_failures')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    console.error('Failed to fetch scan failures:', error);
+    return res.status(500).json({ error: 'Failed to fetch scan failures', status: 500 });
+  }
+
+  return res.status(200).json({ failures: data });
+});
+
 export default router;

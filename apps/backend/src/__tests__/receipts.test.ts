@@ -24,6 +24,7 @@ jest.mock('../services/claude', () => ({
 import { app } from '../index';
 import { queueResult, queueStorageResult, resetQueue } from '../testUtils/supabaseMock';
 import { supabase } from '@smartbudget/shared/lib/supabase';
+import { scanReceipt } from '../services/claude';
 
 const SAMPLE_RECEIPT = {
   id: 'receipt-123',
@@ -70,6 +71,38 @@ describe('POST /api/v1/receipts/scan', () => {
       raw_response: { merchant: 'Test Store', total: 10, date: '2026-01-01', items: [] },
       claude_usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: null, cache_read_input_tokens: null },
     });
+  });
+
+  it('logs a scan_failures row and returns 500 when Claude analysis fails', async () => {
+    (scanReceipt as jest.Mock).mockRejectedValueOnce(new Error('Claude did not return a parseable receipt extraction'));
+    queueResult({ error: null }); // scan_failures insert
+
+    const response = await request(app)
+      .post('/api/v1/receipts/scan')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
+
+    expect(response.status).toBe(500);
+    const insertCall = (supabase.from as jest.Mock).mock.results[0].value.insert as jest.Mock;
+    expect(insertCall).toHaveBeenCalledWith({
+      user_id: 'user-123',
+      error_message: 'Claude did not return a parseable receipt extraction',
+      media_type: 'image/jpeg',
+    });
+  });
+
+  it('still returns 500 (not a crash) if logging the scan failure itself fails', async () => {
+    (scanReceipt as jest.Mock).mockRejectedValueOnce(new Error('Claude timed out'));
+    // No queueResult() — the scan_failures insert will hit the mock's
+    // "no result queued" throw, exercising the nested try/catch around it.
+
+    const response = await request(app)
+      .post('/api/v1/receipts/scan')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Failed to analyze receipt');
   });
 
   it('still returns 201 if the image upload fails', async () => {

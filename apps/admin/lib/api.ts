@@ -151,3 +151,15 @@ export interface RateLimitViolation {
 export function getRateLimitViolations(accessToken: string): Promise<{ violations: RateLimitViolation[] }> {
   return request('/api/v1/admin/rate-limit-violations', accessToken);
 }
+
+export interface ScanFailure {
+  id: string;
+  user_id: string;
+  error_message: string;
+  media_type: string | null;
+  created_at: string;
+}
+
+export function getFailedScans(accessToken: string): Promise<{ failures: ScanFailure[] }> {
+  return request('/api/v1/admin/failed-scans', accessToken);
+}
