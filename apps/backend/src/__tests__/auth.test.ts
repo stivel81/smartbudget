@@ -129,6 +129,20 @@ describe('POST /api/v1/auth/login', () => {
     expect(response.body.error).toMatch(/verify your email/i);
   });
 
+  it('returns 403 with a clear message when the account is suspended', async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: 'User is banned', status: 400, code: 'user_banned' },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'a@b.com', password: 'password123' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatch(/suspended/i);
+  });
+
   it('returns 401 for invalid credentials', async () => {
     mockSignInWithPassword.mockResolvedValue({
       data: { session: null, user: null },

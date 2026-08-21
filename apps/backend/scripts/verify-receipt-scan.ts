@@ -54,8 +54,9 @@ async function main() {
 
   try {
     console.log('Sending image to Claude Haiku 4.5...');
-    const extraction = await scanReceipt(base64, mediaType);
+    const { extraction, usage } = await scanReceipt(base64, mediaType);
     console.log('Extraction:', JSON.stringify(extraction, null, 2));
+    console.log('Usage:', JSON.stringify(usage, null, 2));
 
     const failures: string[] = [];
     if (!extraction.merchant) failures.push('merchant is empty');
@@ -72,7 +73,7 @@ async function main() {
 
     const { data: receipt, error: insertError } = await supabase
       .from('receipts')
-      .insert({ user_id: userId, raw_response: extraction })
+      .insert({ user_id: userId, raw_response: extraction, claude_usage: usage })
       .select()
       .single();
 

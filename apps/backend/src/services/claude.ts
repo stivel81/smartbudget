@@ -46,10 +46,22 @@ export interface ReceiptExtraction {
   items: { name: string; amount: number; category: ReceiptCategory }[];
 }
 
+export interface ClaudeUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number | null;
+  cache_read_input_tokens: number | null;
+}
+
+export interface ScanReceiptResult {
+  extraction: ReceiptExtraction;
+  usage: ClaudeUsage;
+}
+
 export async function scanReceipt(
   base64Image: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
-): Promise<ReceiptExtraction> {
+): Promise<ScanReceiptResult> {
   const response = await anthropic.messages.parse({
     model: 'claude-haiku-4-5',
     max_tokens: 4096,
@@ -77,5 +89,13 @@ export async function scanReceipt(
     throw new Error('Claude did not return a parseable receipt extraction');
   }
 
-  return response.parsed_output as ReceiptExtraction;
+  return {
+    extraction: response.parsed_output as ReceiptExtraction,
+    usage: {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+      cache_creation_input_tokens: response.usage.cache_creation_input_tokens ?? null,
+      cache_read_input_tokens: response.usage.cache_read_input_tokens ?? null,
+    },
+  };
 }

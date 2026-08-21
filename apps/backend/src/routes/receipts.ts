@@ -38,11 +38,14 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
   }
 
   try {
-    const extraction = await scanReceipt(image, mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif');
+    const { extraction, usage } = await scanReceipt(
+      image,
+      mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+    );
 
     const { data, error } = await supabase
       .from('receipts')
-      .insert({ user_id: req.userId, raw_response: extraction })
+      .insert({ user_id: req.userId, raw_response: extraction, claude_usage: usage })
       .select()
       .single();
 
@@ -78,6 +81,21 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
     return res.status(201).json({ receipt: updated });
   } catch (err) {
     console.error('Receipt scan error:', err);
+
+    // Best-effort: log the failure for admin visibility (see
+    // GET /api/v1/admin/failed-scans). Wrapped in its own try/catch so a
+    // logging problem can never change the response the caller already gets.
+    try {
+      const { error: logError } = await supabase.from('scan_failures').insert({
+        user_id: req.userId,
+        error_message: err instanceof Error ? err.message : String(err),
+        media_type: mediaType,
+      });
+      if (logError) console.error('Failed to log scan failure:', logError);
+    } catch (logErr) {
+      console.error('Failed to log scan failure:', logErr);
+    }
+
     return res.status(500).json({ error: 'Failed to analyze receipt', status: 500 });
   }
 });
