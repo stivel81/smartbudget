@@ -269,6 +269,23 @@ export async function deleteBudget(id: string, accessToken: string): Promise<voi
   }
 }
 
+export async function logout(accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to sign out',
+      code: response.status,
+    } as ApiError;
+  }
+}
+
 export async function signup(
   email: string,
   password: string,
