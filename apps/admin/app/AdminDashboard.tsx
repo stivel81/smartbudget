@@ -6,19 +6,22 @@ import UserDetailView from './views/UserDetailView';
 import UsageView from './views/UsageView';
 import RateLimitViolationsView from './views/RateLimitViolationsView';
 import FailedScansView from './views/FailedScansView';
+import AuditLogView from './views/AuditLogView';
 
 type View =
   | { name: 'users' }
   | { name: 'userDetail'; userId: string }
   | { name: 'usage' }
   | { name: 'rateLimits' }
-  | { name: 'failedScans' };
+  | { name: 'failedScans' }
+  | { name: 'auditLog' };
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'users', label: 'Users' },
   { name: 'usage', label: 'Usage' },
   { name: 'rateLimits', label: 'Rate limits' },
   { name: 'failedScans', label: 'Failed scans' },
+  { name: 'auditLog', label: 'Audit log' },
 ];
 
 export default function AdminDashboard({ accessToken }: { accessToken: string }) {
@@ -64,6 +67,8 @@ export default function AdminDashboard({ accessToken }: { accessToken: string })
       {view.name === 'rateLimits' && <RateLimitViolationsView accessToken={accessToken} />}
 
       {view.name === 'failedScans' && <FailedScansView accessToken={accessToken} />}
+
+      {view.name === 'auditLog' && <AuditLogView accessToken={accessToken} />}
     </div>
   );
 }

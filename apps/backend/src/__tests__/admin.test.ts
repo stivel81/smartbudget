@@ -561,3 +561,62 @@ describe('GET /api/v1/admin/failed-scans', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /api/v1/admin/audit-log', () => {
+  it('returns log entries enriched with the acting admin email', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [
+        {
+          id: 'log1',
+          admin_id: 'admin-1',
+          action: 'suspend_user',
+          target_user_id: 'user-456',
+          details: { email: 'target@b.com' },
+          created_at: '2026-01-02T00:00:00Z',
+        },
+        {
+          id: 'log2',
+          admin_id: 'admin-1',
+          action: 'grant_admin',
+          target_user_id: 'user-789',
+          details: { email: 'other@b.com' },
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      error: null,
+    }); // audit log select
+    queueResult({ data: [{ id: 'admin-1', email: 'admin@b.com' }], error: null }); // admin profiles select
+
+    const response = await request(app)
+      .get('/api/v1/admin/audit-log')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.auditLog).toHaveLength(2);
+    expect(response.body.auditLog[0].admin_email).toBe('admin@b.com');
+    expect(response.body.auditLog[1].admin_email).toBe('admin@b.com');
+  });
+
+  it('returns an empty list without querying profiles when there are no log entries', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: [], error: null }); // audit log select — empty
+
+    const response = await request(app)
+      .get('/api/v1/admin/audit-log')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.auditLog).toEqual([]);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .get('/api/v1/admin/audit-log')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});

@@ -163,3 +163,17 @@ export interface ScanFailure {
 export function getFailedScans(accessToken: string): Promise<{ failures: ScanFailure[] }> {
   return request('/api/v1/admin/failed-scans', accessToken);
 }
+
+export interface AuditLogEntry {
+  id: string;
+  admin_id: string;
+  admin_email: string | null;
+  action: string;
+  target_user_id: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export function getAuditLog(accessToken: string): Promise<{ auditLog: AuditLogEntry[] }> {
+  return request('/api/v1/admin/audit-log', accessToken);
+}

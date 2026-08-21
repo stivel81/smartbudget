@@ -382,4 +382,42 @@ router.get('/failed-scans', requireAuth, requireAdmin, async (_req: AuthedReques
   return res.status(200).json({ failures: data });
 });
 
+// GET /api/v1/admin/audit-log — every logged admin action, newest first.
+// admin_id/target_user_id are auth.users FKs (not public.profiles), so
+// PostgREST can't embed them directly — batch-fetch admin emails and merge.
+// Target emails are usually already in `details.email` (captured by each
+// action at the time it ran), which also survives target_user_id going
+// null if the target was later deleted.
+router.get('/audit-log', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
+  const { data: logs, error } = await supabase
+    .from('admin_audit_log')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    console.error('Failed to fetch audit log:', error);
+    return res.status(500).json({ error: 'Failed to fetch audit log', status: 500 });
+  }
+
+  const adminIds = [...new Set((logs ?? []).map((l: any) => l.admin_id))];
+  const { data: admins, error: adminsError } =
+    adminIds.length > 0
+      ? await supabase.from('profiles').select('id, email').in('id', adminIds)
+      : { data: [] as { id: string; email: string | null }[], error: null };
+
+  if (adminsError) {
+    console.error('Failed to fetch admin emails for audit log:', adminsError);
+    return res.status(500).json({ error: 'Failed to fetch audit log', status: 500 });
+  }
+
+  const adminEmailById = new Map((admins ?? []).map((a) => [a.id, a.email]));
+  const auditLog = (logs ?? []).map((l: any) => ({
+    ...l,
+    admin_email: adminEmailById.get(l.admin_id) ?? null,
+  }));
+
+  return res.status(200).json({ auditLog });
+});
+
 export default router;
