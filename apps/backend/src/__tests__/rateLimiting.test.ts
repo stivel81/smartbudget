@@ -27,6 +27,7 @@ jest.mock('../services/claude', () => ({
 }));
 
 import { app } from '../index';
+import { supabase } from '@smartbudget/shared/lib/supabase';
 import { mockGetUser, queueResult } from '../testUtils/supabaseMock';
 
 afterAll(() => {
@@ -42,11 +43,13 @@ describe('Rate limiting', () => {
       expect(res.status).not.toBe(429);
     }
 
+    queueResult({ error: null }); // rate_limit_violations insert, fired by the 429 handler
     const limited = await request(app)
       .post('/api/v1/auth/login')
       .send({ email: 'nobody@example.com', password: 'wrong-password' });
 
     expect(limited.status).toBe(429);
+    expect(supabase.from).toHaveBeenCalledWith('rate_limit_violations');
   });
 
   it('limits repeated receipt scans from the same IP, but not other receipt routes', async () => {
@@ -58,12 +61,14 @@ describe('Rate limiting', () => {
       expect(res.status).not.toBe(429);
     }
 
+    queueResult({ error: null }); // rate_limit_violations insert, fired by the 429 handler
     const limited = await request(app)
       .post('/api/v1/receipts/scan')
       .set('Authorization', 'Bearer valid-token')
       .send({ image: 'ZmFrZQ==', mediaType: 'image/jpeg' });
 
     expect(limited.status).toBe(429);
+    expect(supabase.from).toHaveBeenCalledWith('rate_limit_violations');
 
     // GET /api/v1/receipts shares the /receipts prefix but not the /scan
     // one, so it must not be affected by the scan-specific limiter.

@@ -20,7 +20,8 @@
     "verify:admin-suspend": "ts-node -r dotenv/config scripts/verify-admin-suspend.ts",
     "verify:admin-delete-user": "ts-node -r dotenv/config scripts/verify-admin-delete-user.ts",
     "verify:admin-export": "ts-node -r dotenv/config scripts/verify-admin-export.ts",
-    "verify:admin-usage": "ts-node -r dotenv/config scripts/verify-admin-usage.ts"
+    "verify:admin-usage": "ts-node -r dotenv/config scripts/verify-admin-usage.ts",
+    "verify:rate-limit-violations": "ts-node -r dotenv/config scripts/verify-rate-limit-violations.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

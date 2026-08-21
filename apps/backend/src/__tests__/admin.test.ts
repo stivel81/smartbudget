@@ -499,3 +499,30 @@ describe('GET /api/v1/admin/usage', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /api/v1/admin/rate-limit-violations', () => {
+  it('returns recent violations for an admin caller', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [{ id: 'v1', ip: '127.0.0.1', route: '/api/v1/auth/login', created_at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    }); // violations select
+
+    const response = await request(app)
+      .get('/api/v1/admin/rate-limit-violations')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.violations).toHaveLength(1);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app)
+      .get('/api/v1/admin/rate-limit-violations')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});

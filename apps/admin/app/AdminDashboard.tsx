@@ -4,12 +4,18 @@ import { useState } from 'react';
 import UsersView from './views/UsersView';
 import UserDetailView from './views/UserDetailView';
 import UsageView from './views/UsageView';
+import RateLimitViolationsView from './views/RateLimitViolationsView';
 
-type View = { name: 'users' } | { name: 'userDetail'; userId: string } | { name: 'usage' };
+type View =
+  | { name: 'users' }
+  | { name: 'userDetail'; userId: string }
+  | { name: 'usage' }
+  | { name: 'rateLimits' };
 
 const NAV_ITEMS: { name: View['name']; label: string }[] = [
   { name: 'users', label: 'Users' },
   { name: 'usage', label: 'Usage' },
+  { name: 'rateLimits', label: 'Rate limits' },
 ];
 
 export default function AdminDashboard({ accessToken }: { accessToken: string }) {
@@ -51,6 +57,8 @@ export default function AdminDashboard({ accessToken }: { accessToken: string })
       )}
 
       {view.name === 'usage' && <UsageView accessToken={accessToken} />}
+
+      {view.name === 'rateLimits' && <RateLimitViolationsView accessToken={accessToken} />}
     </div>
   );
 }

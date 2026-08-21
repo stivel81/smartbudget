@@ -350,4 +350,20 @@ router.get('/usage', requireAuth, requireAdmin, async (_req: AuthedRequest, res:
   });
 });
 
+// GET /api/v1/admin/rate-limit-violations — recent 429s, newest first.
+router.get('/rate-limit-violations', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
+  const { data, error } = await supabase
+    .from('rate_limit_violations')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    console.error('Failed to fetch rate limit violations:', error);
+    return res.status(500).json({ error: 'Failed to fetch rate limit violations', status: 500 });
+  }
+
+  return res.status(200).json({ violations: data });
+});
+
 export default router;

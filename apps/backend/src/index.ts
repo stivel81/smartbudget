@@ -14,6 +14,19 @@ import adminRouter from './routes/admin';
 // also gates app.listen() below).
 const skipRateLimit = () => process.env.NODE_ENV === 'test' && process.env.TEST_ENABLE_RATE_LIMIT !== '1';
 
+// express-rate-limit's own counters are in-memory (per-process, reset on
+// restart) — log every rejected request so admins have real visibility
+// into abuse patterns (see GET /api/v1/admin/rate-limit-violations).
+function rateLimitHandler(req: Request, res: Response) {
+  supabase
+    .from('rate_limit_violations')
+    .insert({ ip: req.ip ?? null, route: req.originalUrl })
+    .then(({ error }) => {
+      if (error) console.error('Failed to log rate limit violation:', error);
+    });
+  res.status(429).json({ error: 'Too many requests, please try again later.', status: 429 });
+}
+
 // Brute-force guard on login/signup — keyed by IP, before any auth exists.
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -21,6 +34,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,
+  handler: rateLimitHandler,
 });
 
 // Scan calls Claude (real cost per request) — cap per-IP request rate.
@@ -30,6 +44,7 @@ export const scanLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,
+  handler: rateLimitHandler,
 });
 
 export const app = express();

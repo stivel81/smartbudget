@@ -140,3 +140,14 @@ export interface UsageSummary {
 export function getUsage(accessToken: string): Promise<UsageSummary> {
   return request('/api/v1/admin/usage', accessToken);
 }
+
+export interface RateLimitViolation {
+  id: string;
+  ip: string | null;
+  route: string;
+  created_at: string;
+}
+
+export function getRateLimitViolations(accessToken: string): Promise<{ violations: RateLimitViolation[] }> {
+  return request('/api/v1/admin/rate-limit-violations', accessToken);
+}
