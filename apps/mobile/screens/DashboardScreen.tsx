@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useCallback, useContext, useState } from 'react';
 import {
   StyleSheet,
   Text,
   View,
   ScrollView,
-  TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { AuthContext } from '../App';
+import { getReceipts, Receipt } from '../lib/api';
 
 // Design tokens
 const COLORS = {
@@ -21,133 +24,50 @@ const COLORS = {
   textSecondary: '#666666',
 };
 
-const CATEGORIES = [
-  {
-    id: 'groceries',
-    name: 'Groceries',
-    icon: 'cart',
-    backgroundColor: '#E1F5EE',
-    color: '#0F6E56',
-    spent: 950,
-    limit: 1500,
-  },
-  {
-    id: 'dining',
-    name: 'Dining',
-    icon: 'silverware-fork-knife',
-    backgroundColor: '#FEF3C7',
-    color: '#D97706',
-    spent: 520,
-    limit: 800,
-  },
-  {
-    id: 'transport',
-    name: 'Transport',
-    icon: 'bus',
-    backgroundColor: '#EEF2FF',
-    color: '#4F46E5',
-    spent: 350,
-    limit: 500,
-  },
-  {
-    id: 'entertainment',
-    name: 'Entertainment',
-    icon: 'television',
-    backgroundColor: '#FEE2E2',
-    color: '#DC2626',
-    spent: 180,
-    limit: 400,
-  },
-  {
-    id: 'health',
-    name: 'Health',
-    icon: 'heart',
-    backgroundColor: '#F0FDF4',
-    color: '#16A34A',
-    spent: 247,
-    limit: 500,
-  },
-];
+// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
+const CATEGORY_META: Record<string, { icon: string; backgroundColor: string; color: string }> = {
+  Groceries: { icon: 'cart', backgroundColor: '#E1F5EE', color: '#0F6E56' },
+  Dining: { icon: 'silverware-fork-knife', backgroundColor: '#FEF3C7', color: '#D97706' },
+  Transport: { icon: 'bus', backgroundColor: '#EEF2FF', color: '#4F46E5' },
+  Entertainment: { icon: 'television', backgroundColor: '#FEE2E2', color: '#DC2626' },
+  Health: { icon: 'heart', backgroundColor: '#F0FDF4', color: '#16A34A' },
+  Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
+};
 
-const RECENT_RECEIPTS = [
-  {
-    id: '1',
-    merchant: 'Rami Levy',
-    date: 'Today',
-    amount: 127.50,
-    category: 'groceries',
-  },
-  {
-    id: '2',
-    merchant: 'Café Aroma',
-    date: 'Yesterday',
-    amount: 45.00,
-    category: 'dining',
-  },
-  {
-    id: '3',
-    merchant: 'Rav-Kav',
-    date: '3 days ago',
-    amount: 200.00,
-    category: 'transport',
-  },
-];
-
-interface AvatarProps {
-  initials: string;
+function categoryMeta(category: string) {
+  return CATEGORY_META[category] ?? CATEGORY_META.Other;
 }
 
-const Avatar: React.FC<AvatarProps> = ({ initials }) => (
-  <View
-    style={[
-      styles.avatar,
-      {
-        backgroundColor: COLORS.primary,
-      },
-    ]}
-  >
+interface CategoryTotal {
+  category: string;
+  spent: number;
+}
+
+const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
+  <View style={[styles.avatar, { backgroundColor: COLORS.primary }]}>
     <Text style={styles.avatarText}>{initials}</Text>
   </View>
 );
 
-interface CategoryItemProps {
-  category: (typeof CATEGORIES)[0];
-}
-
-const CategoryItem: React.FC<CategoryItemProps> = ({ category }) => {
-  const percentage = (category.spent / category.limit) * 100;
+const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number }> = ({
+  item,
+  totalSpent,
+}) => {
+  const meta = categoryMeta(item.category);
+  const share = totalSpent > 0 ? (item.spent / totalSpent) * 100 : 0;
 
   return (
     <View style={styles.categoryCard}>
-      <View
-        style={[
-          styles.categoryIconContainer,
-          { backgroundColor: category.backgroundColor },
-        ]}
-      >
-        <MaterialCommunityIcons
-          name={category.icon as any}
-          size={24}
-          color={category.color}
-        />
+      <View style={[styles.categoryIconContainer, { backgroundColor: meta.backgroundColor }]}>
+        <MaterialCommunityIcons name={meta.icon as any} size={24} color={meta.color} />
       </View>
-      <Text style={styles.categoryName}>{category.name}</Text>
-      <Text style={styles.categoryAmount}>
-        ₪{category.spent.toFixed(0)}
-      </Text>
+      <Text style={styles.categoryName}>{item.category}</Text>
+      <Text style={styles.categoryAmount}>₪{item.spent.toFixed(0)}</Text>
       <View style={styles.progressBarContainer}>
         <View
           style={[
             styles.progressBar,
-            {
-              width: `${Math.min(percentage, 100)}%`,
-              backgroundColor:
-                percentage < 70
-                  ? '#16A34A'
-                  : percentage < 90
-                    ? '#F59E0B'
-                    : '#EF4444',
-            },
+            { width: `${Math.min(share, 100)}%`, backgroundColor: COLORS.primary },
           ]}
         />
       </View>
@@ -155,37 +75,67 @@ const CategoryItem: React.FC<CategoryItemProps> = ({ category }) => {
   );
 };
 
-interface ReceiptItemProps {
-  receipt: (typeof RECENT_RECEIPTS)[0];
-}
-
-const ReceiptItem: React.FC<ReceiptItemProps> = ({ receipt }) => {
-  const category = CATEGORIES.find((c) => c.id === receipt.category);
+const ReceiptItem: React.FC<{ receipt: Receipt }> = ({ receipt }) => {
+  const primaryCategory = receipt.raw_response.items[0]?.category ?? 'Other';
+  const meta = categoryMeta(primaryCategory);
 
   return (
     <View style={styles.receiptItem}>
-      <View
-        style={[
-          styles.receiptIconContainer,
-          { backgroundColor: category?.backgroundColor },
-        ]}
-      >
-        <MaterialCommunityIcons
-          name={category?.icon as any}
-          size={20}
-          color={category?.color}
-        />
+      <View style={[styles.receiptIconContainer, { backgroundColor: meta.backgroundColor }]}>
+        <MaterialCommunityIcons name={meta.icon as any} size={20} color={meta.color} />
       </View>
       <View style={styles.receiptInfo}>
-        <Text style={styles.receiptMerchant}>{receipt.merchant}</Text>
-        <Text style={styles.receiptDate}>{receipt.date}</Text>
+        <Text style={styles.receiptMerchant}>{receipt.raw_response.merchant}</Text>
+        <Text style={styles.receiptDate}>{receipt.raw_response.date}</Text>
       </View>
-      <Text style={styles.receiptAmount}>₪{receipt.amount.toFixed(2)}</Text>
+      <Text style={styles.receiptAmount}>₪{receipt.raw_response.total.toFixed(2)}</Text>
     </View>
   );
 };
 
 export default function DashboardScreen(): React.ReactElement {
+  const auth = useContext(AuthContext);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      async function load() {
+        if (!auth.accessToken) return;
+        setLoading(true);
+        setError('');
+        try {
+          const { receipts: data } = await getReceipts(auth.accessToken);
+          if (!cancelled) setReceipts(data);
+        } catch (err: any) {
+          if (!cancelled) setError(err.message || 'Failed to load receipts');
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      }
+
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }, [auth.accessToken])
+  );
+
+  const totalSpent = receipts.reduce((sum, r) => sum + r.raw_response.total, 0);
+
+  const categoryTotals: CategoryTotal[] = Object.values(
+    receipts
+      .flatMap((r) => r.raw_response.items)
+      .reduce<Record<string, CategoryTotal>>((acc, item) => {
+        acc[item.category] = acc[item.category] || { category: item.category, spent: 0 };
+        acc[item.category].spent += item.amount;
+        return acc;
+      }, {})
+  ).sort((a, b) => b.spent - a.spent);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
       <ScrollView
@@ -212,45 +162,56 @@ export default function DashboardScreen(): React.ReactElement {
           <View style={styles.balanceCardContent}>
             <View style={styles.balanceRow}>
               <View>
-                <Text style={styles.balanceLabel}>Spent this month</Text>
-                <Text style={styles.balanceAmount}>₪2,847</Text>
+                <Text style={styles.balanceLabel}>Total spent</Text>
+                <Text style={styles.balanceAmount}>₪{totalSpent.toFixed(0)}</Text>
               </View>
-              <View style={styles.budgetPercentage}>
-                <Text style={styles.percentageText}>68%</Text>
-                <Text style={styles.percentageLabel}>of budget</Text>
-              </View>
-            </View>
-            <View style={styles.balanceDivider} />
-            <View style={styles.balanceRow}>
-              <View>
-                <Text style={styles.balanceLabel}>This week</Text>
-                <Text style={styles.weekAmount}>₪485</Text>
-              </View>
-              <View>
+              <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.balanceLabel}>Receipts</Text>
-                <Text style={styles.receiptCount}>12</Text>
+                <Text style={styles.receiptCount}>{receipts.length}</Text>
               </View>
             </View>
           </View>
         </LinearGradient>
 
-        {/* Categories Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Spending by Category</Text>
-          <View style={styles.categoryGrid}>
-            {CATEGORIES.map((category) => (
-              <CategoryItem key={category.id} category={category} />
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color={COLORS.primary} />
+          </View>
+        )}
+
+        {!loading && error ? (
+          <View style={styles.section}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {!loading && !error && receipts.length === 0 && (
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons name="receipt" size={40} color={COLORS.textSecondary} />
+            <Text style={styles.emptyStateTitle}>No receipts yet</Text>
+            <Text style={styles.emptyStateSubtitle}>Scan your first receipt to see it here</Text>
+          </View>
+        )}
+
+        {!loading && categoryTotals.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Spending by Category</Text>
+            <View style={styles.categoryGrid}>
+              {categoryTotals.map((item) => (
+                <CategoryItem key={item.category} item={item} totalSpent={totalSpent} />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {!loading && receipts.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Receipts</Text>
+            {receipts.slice(0, 5).map((receipt) => (
+              <ReceiptItem key={receipt.id} receipt={receipt} />
             ))}
           </View>
-        </View>
-
-        {/* Recent Receipts Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Receipts</Text>
-          {RECENT_RECEIPTS.map((receipt) => (
-            <ReceiptItem key={receipt.id} receipt={receipt} />
-          ))}
-        </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -319,34 +280,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
-  weekAmount: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 4,
-  },
   receiptCount: {
     color: '#ffffff',
     fontSize: 20,
     fontWeight: '700',
     marginTop: 4,
   },
-  budgetPercentage: {
-    alignItems: 'flex-end',
+  loadingContainer: {
+    paddingVertical: 24,
+    alignItems: 'center',
   },
-  percentageText: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: '700',
+  errorText: {
+    color: '#EF4444',
+    fontSize: 14,
+    textAlign: 'center',
   },
-  percentageLabel: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    marginTop: 4,
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  balanceDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginTop: 8,
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   section: {
     paddingHorizontal: 16,
