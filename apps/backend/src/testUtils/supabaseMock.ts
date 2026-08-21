@@ -56,8 +56,23 @@ export const mockGetUser = jest.fn(async (token: string) => {
   return { data: { user: null }, error: { message: 'Invalid token' } };
 });
 
+// Admin-API mocks used by the admin routes (user detail, suspend, delete).
+// Configure per-test with mockResolvedValueOnce.
+export const mockGetUserById = jest.fn();
+export const mockUpdateUserById = jest.fn();
+export const mockDeleteUserAdmin = jest.fn();
+export const mockListUsers = jest.fn();
+
 export const supabase = {
-  auth: { getUser: mockGetUser },
+  auth: {
+    getUser: mockGetUser,
+    admin: {
+      getUserById: mockGetUserById,
+      updateUserById: mockUpdateUserById,
+      deleteUser: mockDeleteUserAdmin,
+      listUsers: mockListUsers,
+    },
+  },
   from: jest.fn(() => makeBuilder()),
   storage: {
     from: jest.fn(() => ({

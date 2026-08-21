@@ -14,7 +14,8 @@
     "verify:email-verification": "ts-node -r dotenv/config scripts/verify-email-verification.ts",
     "verify:admin-users": "ts-node -r dotenv/config scripts/verify-admin-users.ts",
     "verify:token-refresh": "ts-node -r dotenv/config scripts/verify-token-refresh.ts",
-    "verify:audit-log": "ts-node -r dotenv/config scripts/verify-audit-log.ts"
+    "verify:audit-log": "ts-node -r dotenv/config scripts/verify-audit-log.ts",
+    "verify:admin-user-detail": "ts-node -r dotenv/config scripts/verify-admin-user-detail.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
