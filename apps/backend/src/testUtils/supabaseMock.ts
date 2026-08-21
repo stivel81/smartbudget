@@ -68,9 +68,20 @@ export const supabase = {
   },
 };
 
-// requireAuth verifies bearer tokens via a separate client instance
-// (see packages/shared/lib/supabaseAuth.ts) — mocked here too so routes
-// under test resolve the same way regardless of which client they use.
+// requireAuth verifies bearer tokens, and routes/auth.ts signs up/in/out,
+// via a separate client instance (see packages/shared/lib/supabaseAuth.ts)
+// — mocked here too so routes under test resolve the same way regardless
+// of which client they use. Auth tests configure these per-test with
+// mockResolvedValueOnce rather than the queue pattern above.
+export const mockSignUp = jest.fn();
+export const mockSignInWithPassword = jest.fn();
+export const mockAdminSignOut = jest.fn();
+
 export const supabaseAuth = {
-  auth: { getUser: mockGetUser },
+  auth: {
+    getUser: mockGetUser,
+    signUp: mockSignUp,
+    signInWithPassword: mockSignInWithPassword,
+    admin: { signOut: mockAdminSignOut },
+  },
 };

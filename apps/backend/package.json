@@ -10,7 +10,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "verify:receipt-scan": "ts-node -r dotenv/config scripts/verify-receipt-scan.ts",
-    "verify:receipt-image-storage": "ts-node -r dotenv/config scripts/verify-receipt-image-storage.ts"
+    "verify:receipt-image-storage": "ts-node -r dotenv/config scripts/verify-receipt-image-storage.ts",
+    "verify:email-verification": "ts-node -r dotenv/config scripts/verify-email-verification.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

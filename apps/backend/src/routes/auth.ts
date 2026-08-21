@@ -51,12 +51,14 @@ router.post('/signup', async (req: Request, res: Response) => {
   }
 
   try {
-    // Create user with Supabase auth using admin API for auto-confirmation (MVP)
-    const { data, error } = await supabaseAuth.auth.admin.createUser({
+    // Real signup: Supabase sends a confirmation email and the account
+    // can't log in until it's verified (Auth setting "Confirm email",
+    // on by default) — replaces the previous admin.createUser(email_confirm:
+    // true) auto-confirm shortcut.
+    const { data, error } = await supabaseAuth.auth.signUp({
       email,
       password,
-      email_confirm: true, // Auto-confirm email for MVP
-      user_metadata: { name },
+      options: { data: { name } },
     });
 
     if (error) {
@@ -69,6 +71,16 @@ router.post('/signup', async (req: Request, res: Response) => {
       }
       return res.status(400).json({
         error: error.message,
+        status: 400,
+      });
+    }
+
+    // Anti-enumeration behavior: signing up with an email that's already
+    // registered and confirmed returns 200 with a user that has no
+    // identities, rather than an error.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      return res.status(400).json({
+        error: 'Email already registered',
         status: 400,
       });
     }
@@ -116,6 +128,12 @@ router.post('/login', async (req: Request, res: Response) => {
     });
 
     if (error) {
+      if (error.message.includes('Email not confirmed')) {
+        return res.status(401).json({
+          error: 'Please verify your email before signing in — check your inbox for the confirmation link.',
+          status: 401,
+        });
+      }
       // Invalid credentials should return 401, not 400
       if (error.message.includes('Invalid login credentials') || error.status === 400) {
         return res.status(401).json({
