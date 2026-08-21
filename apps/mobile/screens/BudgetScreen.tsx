@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,8 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { AuthContext } from '../App';
+import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
 
 const COLORS = {
   primary: '#1D9E75',
@@ -21,117 +28,58 @@ const COLORS = {
   textSecondary: '#666666',
 };
 
-const BUDGET_ITEMS = [
-  {
-    id: 'groceries',
-    name: 'Groceries',
-    icon: 'cart',
-    backgroundColor: '#E1F5EE',
-    color: '#0F6E56',
-    spent: 950,
-    limit: 1500,
-  },
-  {
-    id: 'dining',
-    name: 'Dining',
-    icon: 'silverware-fork-knife',
-    backgroundColor: '#FEF3C7',
-    color: '#D97706',
-    spent: 760,
-    limit: 800,
-  },
-  {
-    id: 'transport',
-    name: 'Transport',
-    icon: 'bus',
-    backgroundColor: '#EEF2FF',
-    color: '#4F46E5',
-    spent: 350,
-    limit: 500,
-  },
-  {
-    id: 'entertainment',
-    name: 'Entertainment',
-    icon: 'television',
-    backgroundColor: '#FEE2E2',
-    color: '#DC2626',
-    spent: 180,
-    limit: 400,
-  },
-  {
-    id: 'health',
-    name: 'Health',
-    icon: 'heart',
-    backgroundColor: '#F0FDF4',
-    color: '#16A34A',
-    spent: 247,
-    limit: 500,
-  },
-];
+// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
+const CATEGORY_META: Record<string, { icon: string; backgroundColor: string; color: string }> = {
+  Groceries: { icon: 'cart', backgroundColor: '#E1F5EE', color: '#0F6E56' },
+  Dining: { icon: 'silverware-fork-knife', backgroundColor: '#FEF3C7', color: '#D97706' },
+  Transport: { icon: 'bus', backgroundColor: '#EEF2FF', color: '#4F46E5' },
+  Entertainment: { icon: 'television', backgroundColor: '#FEE2E2', color: '#DC2626' },
+  Health: { icon: 'heart', backgroundColor: '#F0FDF4', color: '#16A34A' },
+  Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
+};
 
-interface AlertBannerProps {
-  show: boolean;
-  overBudgetCategories: string[];
+function categoryMeta(category: string) {
+  return CATEGORY_META[category] ?? CATEGORY_META.Other;
 }
 
-const AlertBanner: React.FC<AlertBannerProps> = ({ show, overBudgetCategories }) => {
-  if (!show || overBudgetCategories.length === 0) {
-    return null;
-  }
+interface BudgetWithSpend extends Budget {
+  spent: number;
+}
 
-  const categoryNames = overBudgetCategories.join(' and ');
+const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[] }> = ({ overBudget }) => {
+  if (overBudget.length === 0) return null;
+
+  const names = overBudget.map((b) => b.category).join(' and ');
 
   return (
     <View style={styles.alertBanner}>
       <MaterialCommunityIcons name="alert-circle" size={20} color="#92400e" />
       <Text style={styles.alertText}>
-        {categoryNames} {overBudgetCategories.length === 1 ? 'is' : 'are'} at 90%+
-        of budget
+        {names} {overBudget.length === 1 ? 'is' : 'are'} at 90%+ of budget
       </Text>
     </View>
   );
 };
 
-interface BudgetItemProps {
-  item: (typeof BUDGET_ITEMS)[0];
-}
+const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ item, onPress }) => {
+  const meta = categoryMeta(item.category);
+  const percentage = (item.spent / item.monthly_limit) * 100;
 
-const BudgetItem: React.FC<BudgetItemProps> = ({ item }) => {
-  const percentage = (item.spent / item.limit) * 100;
-  const isOverBudget = percentage > 100;
-  const isWarning = percentage >= 90 && percentage <= 100;
-  const isAlert = percentage >= 70 && percentage < 90;
-  const isHealthy = percentage < 70;
-
-  let barColor = '#16A34A'; // green
-  if (isOverBudget) {
-    barColor = '#EF4444'; // red
-  } else if (isWarning) {
-    barColor = '#EF4444'; // red
-  } else if (isAlert) {
-    barColor = '#F59E0B'; // amber
-  }
+  let barColor = '#16A34A'; // green, under 70%
+  if (percentage >= 90) barColor = '#EF4444'; // red
+  else if (percentage >= 70) barColor = '#F59E0B'; // amber
 
   return (
-    <View style={styles.budgetItem}>
+    <TouchableOpacity style={styles.budgetItem} onPress={onPress}>
       <View style={styles.budgetItemHeader}>
         <View style={styles.budgetItemLeft}>
-          <View
-            style={[
-              styles.budgetItemIcon,
-              { backgroundColor: item.backgroundColor },
-            ]}
-          >
-            <MaterialCommunityIcons
-              name={item.icon as any}
-              size={20}
-              color={item.color}
-            />
+          <View style={[styles.budgetItemIcon, { backgroundColor: meta.backgroundColor }]}>
+            <MaterialCommunityIcons name={meta.icon as any} size={20} color={meta.color} />
           </View>
           <View>
-            <Text style={styles.budgetItemName}>{item.name}</Text>
+            <Text style={styles.budgetItemName}>{item.category}</Text>
             <Text style={styles.budgetItemSpent}>
-              ₪{item.spent.toFixed(0)} / ₪{item.limit.toFixed(0)}
+              ₪{item.spent.toFixed(0)} / ₪{item.monthly_limit.toFixed(0)}
             </Text>
           </View>
         </View>
@@ -139,9 +87,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ item }) => {
           <Text
             style={[
               styles.budgetItemPercentageText,
-              {
-                color: isOverBudget ? '#EF4444' : COLORS.textPrimary,
-              },
+              { color: percentage > 100 ? COLORS.alert : COLORS.textPrimary },
             ]}
           >
             {Math.min(Math.round(percentage), 999)}%
@@ -149,30 +95,108 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ item }) => {
         </View>
       </View>
       <View style={styles.progressBarContainer}>
-        <View
-          style={[
-            styles.progressBar,
-            {
-              width: `${Math.min(percentage, 100)}%`,
-              backgroundColor: barColor,
-            },
-          ]}
-        />
+        <View style={[styles.progressBar, { width: `${Math.min(percentage, 100)}%`, backgroundColor: barColor }]} />
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
 export default function BudgetScreen(): React.ReactElement {
-  const overBudgetCategories = useMemo(() => {
-    return BUDGET_ITEMS.filter((item) => (item.spent / item.limit) * 100 >= 90)
-      .map((item) => item.name);
-  }, []);
+  const auth = useContext(AuthContext);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const currentMonth = new Date().toLocaleDateString('en-US', {
-    month: 'long',
-    year: 'numeric',
-  });
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalCategory, setModalCategory] = useState<string>(RECEIPT_CATEGORIES[0]);
+  const [modalLimit, setModalLimit] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      async function load() {
+        if (!auth.accessToken) return;
+        setLoading(true);
+        setError('');
+        try {
+          const [budgetsRes, receiptsRes] = await Promise.all([
+            getBudgets(auth.accessToken),
+            getReceipts(auth.accessToken),
+          ]);
+          if (!cancelled) {
+            setBudgets(budgetsRes.budgets);
+            setReceipts(receiptsRes.receipts);
+          }
+        } catch (err: any) {
+          if (!cancelled) setError(err.message || 'Failed to load budgets');
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      }
+
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }, [auth.accessToken])
+  );
+
+  const categorySpend = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const receipt of receipts) {
+      for (const item of receipt.raw_response.items) {
+        totals[item.category] = (totals[item.category] || 0) + item.amount;
+      }
+    }
+    return totals;
+  }, [receipts]);
+
+  const budgetsWithSpend: BudgetWithSpend[] = useMemo(
+    () => budgets.map((b) => ({ ...b, spent: categorySpend[b.category] || 0 })),
+    [budgets, categorySpend]
+  );
+
+  const overBudget = budgetsWithSpend.filter((b) => (b.spent / b.monthly_limit) * 100 >= 90);
+  const totalSpent = budgetsWithSpend.reduce((sum, b) => sum + b.spent, 0);
+  const totalBudget = budgetsWithSpend.reduce((sum, b) => sum + b.monthly_limit, 0);
+
+  const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const openAddModal = () => {
+    setModalCategory(RECEIPT_CATEGORIES[0]);
+    setModalLimit('');
+    setModalVisible(true);
+  };
+
+  const openEditModal = (budget: Budget) => {
+    setModalCategory(budget.category);
+    setModalLimit(String(budget.monthly_limit));
+    setModalVisible(true);
+  };
+
+  const saveBudget = async () => {
+    const limitNumber = Number(modalLimit);
+    if (!modalLimit || !(limitNumber > 0)) {
+      Alert.alert('Invalid limit', 'Enter a limit greater than 0.');
+      return;
+    }
+    if (!auth.accessToken) return;
+
+    setSaving(true);
+    try {
+      await upsertBudget(modalCategory, limitNumber, auth.accessToken);
+      const { budgets: updated } = await getBudgets(auth.accessToken);
+      setBudgets(updated);
+      setModalVisible(false);
+    } catch (err: any) {
+      Alert.alert('Failed to save budget', err.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
@@ -187,49 +211,120 @@ export default function BudgetScreen(): React.ReactElement {
             <Text style={styles.monthText}>{currentMonth}</Text>
             <Text style={styles.title}>Budget</Text>
           </View>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => {
-              /* Add budget functionality would go here */
-            }}
-          >
-            <MaterialCommunityIcons
-              name="plus"
-              size={24}
-              color={COLORS.primary}
-            />
+          <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+            <MaterialCommunityIcons name="plus" size={24} color={COLORS.primary} />
           </TouchableOpacity>
         </View>
 
-        {/* Alert Banner */}
-        <AlertBanner show={true} overBudgetCategories={overBudgetCategories} />
-
-        {/* Budget Items */}
-        <View style={styles.section}>
-          {BUDGET_ITEMS.map((item) => (
-            <BudgetItem key={item.id} item={item} />
-          ))}
-        </View>
-
-        {/* Total Summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total Spent</Text>
-            <Text style={styles.summaryValue}>₪2,487</Text>
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color={COLORS.primary} />
           </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total Budget</Text>
-            <Text style={styles.summaryValue}>₪4,200</Text>
+        )}
+
+        {!loading && error ? (
+          <View style={styles.section}>
+            <Text style={styles.errorText}>{error}</Text>
           </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Remaining</Text>
-            <Text style={[styles.summaryValue, { color: COLORS.primary }]}>
-              ₪1,713
+        ) : null}
+
+        {!loading && !error && (
+          <AlertBanner overBudget={overBudget} />
+        )}
+
+        {!loading && !error && budgetsWithSpend.length === 0 && (
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons name="wallet-outline" size={40} color={COLORS.textSecondary} />
+            <Text style={styles.emptyStateTitle}>No budgets set</Text>
+            <Text style={styles.emptyStateSubtitle}>
+              Tap the + button to set a monthly limit for a category
             </Text>
           </View>
-        </View>
+        )}
+
+        {!loading && budgetsWithSpend.length > 0 && (
+          <>
+            <View style={styles.section}>
+              {budgetsWithSpend.map((item) => (
+                <BudgetItem key={item.id} item={item} onPress={() => openEditModal(item)} />
+              ))}
+            </View>
+
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Spent</Text>
+                <Text style={styles.summaryValue}>₪{totalSpent.toFixed(0)}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Budget</Text>
+                <Text style={styles.summaryValue}>₪{totalBudget.toFixed(0)}</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Remaining</Text>
+                <Text style={[styles.summaryValue, { color: COLORS.primary }]}>
+                  ₪{(totalBudget - totalSpent).toFixed(0)}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
       </ScrollView>
+
+      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Set Budget</Text>
+
+            <Text style={styles.modalLabel}>Category</Text>
+            <View style={styles.categoryChips}>
+              {RECEIPT_CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.categoryChip, modalCategory === cat && styles.categoryChipSelected]}
+                  onPress={() => setModalCategory(cat)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      modalCategory === cat && styles.categoryChipTextSelected,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>Monthly limit (₪)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={modalLimit}
+              onChangeText={setModalLimit}
+              keyboardType="numeric"
+              placeholder="e.g. 1500"
+              placeholderTextColor={COLORS.textSecondary}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setModalVisible(false)}
+                disabled={saving}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSaveButton} onPress={saveBudget} disabled={saving}>
+                {saving ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text style={styles.modalSaveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -270,6 +365,33 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingContainer: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: COLORS.alert,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginTop: 8,
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   alertBanner: {
     flexDirection: 'row',
@@ -376,5 +498,97 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: COLORS.border,
     marginVertical: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    gap: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+  },
+  modalLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  categoryChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  categoryChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#fafafa',
+  },
+  categoryChipSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  categoryChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  categoryChipTextSelected: {
+    color: '#ffffff',
+  },
+  modalInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#fafafa',
+    color: COLORS.textPrimary,
+    fontSize: 16,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  modalCancelButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  modalSaveButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSaveButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
 });

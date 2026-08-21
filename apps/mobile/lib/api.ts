@@ -1,6 +1,16 @@
 // API base URL for backend communication
 export const API_BASE_URL = 'http://localhost:3000';
 
+// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
+export const RECEIPT_CATEGORIES = [
+  'Groceries',
+  'Dining',
+  'Transport',
+  'Entertainment',
+  'Health',
+  'Other',
+] as const;
+
 export interface LoginRequest {
   email: string;
   password: string;
@@ -118,6 +128,125 @@ export async function getReceipts(accessToken: string): Promise<GetReceiptsRespo
   }
 
   return response.json();
+}
+
+export async function updateReceipt(
+  id: string,
+  updates: { merchant?: string; total?: number; date?: string },
+  accessToken: string
+): Promise<ScanReceiptResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to update receipt',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export async function deleteReceipt(id: string, accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to delete receipt',
+      code: response.status,
+    } as ApiError;
+  }
+}
+
+export interface Budget {
+  id: string;
+  user_id: string;
+  category: string;
+  monthly_limit: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GetBudgetsResponse {
+  budgets: Budget[];
+}
+
+export interface UpsertBudgetResponse {
+  budget: Budget;
+}
+
+export async function getBudgets(accessToken: string): Promise<GetBudgetsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/budgets`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to load budgets',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export async function upsertBudget(
+  category: string,
+  monthlyLimit: number,
+  accessToken: string
+): Promise<UpsertBudgetResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/budgets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ category, monthlyLimit }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to save budget',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export async function deleteBudget(id: string, accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/budgets/${id}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to delete budget',
+      code: response.status,
+    } as ApiError;
+  }
 }
 
 export async function signup(

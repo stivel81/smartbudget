@@ -9,10 +9,11 @@ import {
   Dimensions,
   ActivityIndicator,
   Alert,
+  TextInput,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { scanReceipt } from '../lib/api';
+import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
 import { AuthContext } from '../App';
 
 const COLORS = {
@@ -31,6 +32,7 @@ const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 const CAMERA_HEIGHT = screenHeight * 0.65;
 
 interface AIResult {
+  id: string;
   merchant: string;
   category: string;
   date: string;
@@ -91,7 +93,11 @@ const CornerGuide: React.FC<CornerGuideProps> = ({ position }) => {
 export default function ScanScreen(): React.ReactElement {
   const [showResult, setShowResult] = useState(false);
   const [result, setResult] = useState<AIResult | null>(null);
+  const [editedMerchant, setEditedMerchant] = useState('');
+  const [editedTotal, setEditedTotal] = useState('');
   const [loading, setLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const auth = useContext(AuthContext);
   const slideAnim = useRef(new Animated.Value(300)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -120,6 +126,8 @@ export default function ScanScreen(): React.ReactElement {
 
   const showResultCard = (result: AIResult) => {
     setResult(result);
+    setEditedMerchant(result.merchant);
+    setEditedTotal(result.total.toFixed(2));
     setShowResult(true);
 
     // Animate result card sliding up
@@ -149,6 +157,7 @@ export default function ScanScreen(): React.ReactElement {
       const categories = Array.from(new Set(extraction.items.map((item) => item.category)));
 
       showResultCard({
+        id: receipt.id,
         merchant: extraction.merchant,
         category: categories.length > 0 ? categories.join(', ') : 'Uncategorized',
         date: extraction.date,
@@ -205,6 +214,65 @@ export default function ScanScreen(): React.ReactElement {
       setShowResult(false);
       setResult(null);
     });
+  };
+
+  const handleCancel = async () => {
+    if (!result || !auth.accessToken) {
+      handleDismiss();
+      return;
+    }
+
+    setDiscarding(true);
+    try {
+      await deleteReceipt(result.id, auth.accessToken);
+      handleDismiss();
+    } catch (err: any) {
+      Alert.alert('Failed to discard', err.message || 'Please try again.');
+    } finally {
+      setDiscarding(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!result || !auth.accessToken) {
+      handleDismiss();
+      return;
+    }
+
+    const totalNumber = Number(editedTotal);
+    if (!editedMerchant.trim()) {
+      Alert.alert('Merchant required', 'Merchant name cannot be empty.');
+      return;
+    }
+    if (!editedTotal || !(totalNumber > 0)) {
+      Alert.alert('Invalid total', 'Total must be a positive number.');
+      return;
+    }
+
+    const merchantChanged = editedMerchant.trim() !== result.merchant;
+    const totalChanged = totalNumber !== result.total;
+
+    if (!merchantChanged && !totalChanged) {
+      handleDismiss();
+      return;
+    }
+
+    setConfirming(true);
+    try {
+      await updateReceipt(
+        result.id,
+        {
+          ...(merchantChanged && { merchant: editedMerchant.trim() }),
+          ...(totalChanged && { total: totalNumber }),
+        },
+        auth.accessToken
+      );
+      handleDismiss();
+    } catch (err: any) {
+      Alert.alert('Failed to save changes', err.message || 'Please try again.');
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (
@@ -297,7 +365,12 @@ export default function ScanScreen(): React.ReactElement {
             {/* Result Items */}
             <View style={componentStyles.resultItem}>
               <Text style={componentStyles.resultLabel}>Merchant</Text>
-              <Text style={componentStyles.resultValue}>{result.merchant}</Text>
+              <TextInput
+                style={componentStyles.resultInput}
+                value={editedMerchant}
+                onChangeText={setEditedMerchant}
+                editable={!confirming && !discarding}
+              />
             </View>
 
             <View style={componentStyles.resultItem}>
@@ -311,28 +384,39 @@ export default function ScanScreen(): React.ReactElement {
             </View>
 
             <View style={[componentStyles.resultItem, componentStyles.resultTotal]}>
-              <Text style={componentStyles.resultLabel}>Total</Text>
-              <Text style={componentStyles.resultTotalValue}>
-                ₪{result.total.toFixed(2)}
-              </Text>
+              <Text style={componentStyles.resultLabel}>Total (₪)</Text>
+              <TextInput
+                style={componentStyles.resultTotalInput}
+                value={editedTotal}
+                onChangeText={setEditedTotal}
+                keyboardType="numeric"
+                editable={!confirming && !discarding}
+              />
             </View>
 
             {/* Buttons */}
             <View style={componentStyles.resultButtons}>
               <TouchableOpacity
                 style={componentStyles.cancelButton}
-                onPress={handleDismiss}
+                onPress={handleCancel}
+                disabled={confirming || discarding}
               >
-                <Text style={componentStyles.cancelButtonText}>Cancel</Text>
+                {discarding ? (
+                  <ActivityIndicator color={COLORS.textPrimary} />
+                ) : (
+                  <Text style={componentStyles.cancelButtonText}>Cancel</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={componentStyles.confirmButton}
-                onPress={() => {
-                  /* Save receipt would go here */
-                  handleDismiss();
-                }}
+                onPress={handleConfirm}
+                disabled={confirming || discarding}
               >
-                <Text style={componentStyles.confirmButtonText}>Confirm</Text>
+                {confirming ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text style={componentStyles.confirmButtonText}>Confirm</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -465,10 +549,28 @@ const componentStyles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontWeight: '600',
   },
+  resultInput: {
+    fontSize: 14,
+    color: COLORS.textPrimary,
+    fontWeight: '600',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 12,
+    padding: 0,
+  },
   resultTotalValue: {
     fontSize: 18,
     color: COLORS.primary,
     fontWeight: '700',
+  },
+  resultTotalInput: {
+    fontSize: 18,
+    color: COLORS.primary,
+    fontWeight: '700',
+    textAlign: 'right',
+    flex: 1,
+    marginLeft: 12,
+    padding: 0,
   },
   resultButtons: {
     flexDirection: 'row',
