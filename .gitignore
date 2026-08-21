@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Env files (never commit secrets)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Expo / React Native (apps/mobile)
+apps/mobile/.expo/
+apps/mobile/.expo-shared/
+apps/mobile/dist/
+apps/mobile/web-build/
+apps/mobile/*.jks
+apps/mobile/*.p8
+apps/mobile/*.p12
+apps/mobile/*.key
+apps/mobile/*.mobileprovision
+apps/mobile/*.orig.*
+apps/mobile/ios/Pods/
+apps/mobile/ios/build/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/local.properties
+
+# Next.js (apps/admin)
+apps/admin/.next/
+apps/admin/out/
+apps/admin/.vercel/
+
+# Supabase local dev
+supabase/.branches/
+supabase/.temp/
+
+# Claude Code local config (contains MCP secrets / personal settings)
+.claude/claude.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/.DS_Store
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Test coverage
+coverage/
+
+# Misc
+.turbo/
+.cache/

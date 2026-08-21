@@ -1,0 +1,11 @@
+{
+  "name": "smartbudget",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/mobile",
+    "apps/backend",
+    "apps/admin",
+    "packages/shared"
+  ]
+}
