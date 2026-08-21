@@ -10,16 +10,20 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 
 jest.mock('../services/claude', () => ({
   scanReceipt: jest.fn(async () => ({
-    merchant: 'Test Store',
-    total: 10,
-    date: '2026-01-01',
-    items: [],
+    extraction: {
+      merchant: 'Test Store',
+      total: 10,
+      date: '2026-01-01',
+      items: [],
+    },
+    usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: null, cache_read_input_tokens: null },
   })),
   RECEIPT_CATEGORIES: ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other'],
 }));
 
 import { app } from '../index';
 import { queueResult, queueStorageResult, resetQueue } from '../testUtils/supabaseMock';
+import { supabase } from '@smartbudget/shared/lib/supabase';
 
 const SAMPLE_RECEIPT = {
   id: 'receipt-123',
@@ -31,6 +35,7 @@ const SAMPLE_RECEIPT = {
 
 beforeEach(() => {
   resetQueue();
+  jest.clearAllMocks();
 });
 
 describe('POST /api/v1/receipts/scan', () => {
@@ -47,6 +52,24 @@ describe('POST /api/v1/receipts/scan', () => {
     expect(response.status).toBe(201);
     expect(response.body.receipt.raw_response.merchant).toBe('Test Store');
     expect(response.body.receipt.image_path).toBe('user-123/receipt-123.jpg');
+  });
+
+  it("persists Claude's token usage on the receipt row", async () => {
+    queueResult({ data: SAMPLE_RECEIPT, error: null }); // insert
+    queueStorageResult({ error: null }); // storage upload
+    queueResult({ data: { ...SAMPLE_RECEIPT, image_path: 'user-123/receipt-123.jpg' }, error: null }); // update
+
+    await request(app)
+      .post('/api/v1/receipts/scan')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
+
+    const insertCall = (supabase.from as jest.Mock).mock.results[0].value.insert as jest.Mock;
+    expect(insertCall).toHaveBeenCalledWith({
+      user_id: 'user-123',
+      raw_response: { merchant: 'Test Store', total: 10, date: '2026-01-01', items: [] },
+      claude_usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+    });
   });
 
   it('still returns 201 if the image upload fails', async () => {

@@ -439,3 +439,63 @@ describe('GET /api/v1/admin/users/:id/export', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /api/v1/admin/usage', () => {
+  it('aggregates token usage and estimated cost by day', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [
+        {
+          created_at: '2026-01-01T10:00:00Z',
+          claude_usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        },
+        {
+          created_at: '2026-01-01T14:00:00Z',
+          claude_usage: { input_tokens: 500, output_tokens: 100, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        },
+        {
+          created_at: '2026-01-02T09:00:00Z',
+          claude_usage: { input_tokens: 2000, output_tokens: 400, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        },
+      ],
+      error: null,
+    }); // receipts select
+
+    const response = await request(app)
+      .get('/api/v1/admin/usage')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.totalScans).toBe(3);
+    expect(response.body.totalInputTokens).toBe(3500);
+    expect(response.body.totalOutputTokens).toBe(700);
+    // (3500 * $1/1M) + (700 * $5/1M) = 0.0035 + 0.0035 = 0.007
+    expect(response.body.estimatedCostUsd).toBeCloseTo(0.007, 6);
+    expect(response.body.byDay).toEqual([
+      { date: '2026-01-02', scans: 1, inputTokens: 2000, outputTokens: 400 },
+      { date: '2026-01-01', scans: 2, inputTokens: 1500, outputTokens: 300 },
+    ]);
+  });
+
+  it('returns zeroed totals when there are no scans with usage yet', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: [], error: null }); // receipts select
+
+    const response = await request(app)
+      .get('/api/v1/admin/usage')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.totalScans).toBe(0);
+    expect(response.body.estimatedCostUsd).toBe(0);
+    expect(response.body.byDay).toEqual([]);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app).get('/api/v1/admin/usage').set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});

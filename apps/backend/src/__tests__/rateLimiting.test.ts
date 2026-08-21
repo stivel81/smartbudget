@@ -15,10 +15,13 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 
 jest.mock('../services/claude', () => ({
   scanReceipt: jest.fn(async () => ({
-    merchant: 'Test Store',
-    total: 10,
-    date: '2026-01-01',
-    items: [],
+    extraction: {
+      merchant: 'Test Store',
+      total: 10,
+      date: '2026-01-01',
+      items: [],
+    },
+    usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: null, cache_read_input_tokens: null },
   })),
   RECEIPT_CATEGORIES: ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other'],
 }));

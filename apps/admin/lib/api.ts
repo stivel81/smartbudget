@@ -121,3 +121,22 @@ export interface UserDataExport {
 export function exportUserData(userId: string, accessToken: string): Promise<UserDataExport> {
   return request(`/api/v1/admin/users/${userId}/export`, accessToken);
 }
+
+export interface DailyUsage {
+  date: string;
+  scans: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface UsageSummary {
+  totalScans: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  estimatedCostUsd: number;
+  byDay: DailyUsage[];
+}
+
+export function getUsage(accessToken: string): Promise<UsageSummary> {
+  return request('/api/v1/admin/usage', accessToken);
+}

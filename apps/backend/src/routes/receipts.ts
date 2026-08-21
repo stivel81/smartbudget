@@ -38,11 +38,14 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
   }
 
   try {
-    const extraction = await scanReceipt(image, mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif');
+    const { extraction, usage } = await scanReceipt(
+      image,
+      mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+    );
 
     const { data, error } = await supabase
       .from('receipts')
-      .insert({ user_id: req.userId, raw_response: extraction })
+      .insert({ user_id: req.userId, raw_response: extraction, claude_usage: usage })
       .select()
       .single();
 

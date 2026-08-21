@@ -295,4 +295,59 @@ router.get('/users/:id/export', requireAuth, requireAdmin, async (req: AuthedReq
   });
 });
 
+// Haiku 4.5 pricing: $1/1M input tokens, $5/1M output tokens.
+const HAIKU_INPUT_COST_PER_TOKEN = 1 / 1_000_000;
+const HAIKU_OUTPUT_COST_PER_TOKEN = 5 / 1_000_000;
+
+interface ClaudeUsageRow {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+// GET /api/v1/admin/usage — Claude API token usage/cost, aggregated from
+// the usage persisted on each receipt at scan time (see routes/receipts.ts).
+router.get('/usage', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
+  const { data: receipts, error } = await supabase
+    .from('receipts')
+    .select('created_at, claude_usage')
+    .not('claude_usage', 'is', null)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Failed to fetch usage:', error);
+    return res.status(500).json({ error: 'Failed to fetch usage', status: 500 });
+  }
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  const byDay: Record<string, { scans: number; inputTokens: number; outputTokens: number }> = {};
+
+  for (const r of receipts ?? []) {
+    const usage = r.claude_usage as ClaudeUsageRow | null;
+    if (!usage) continue;
+
+    totalInputTokens += usage.input_tokens;
+    totalOutputTokens += usage.output_tokens;
+
+    const day = String(r.created_at).slice(0, 10); // YYYY-MM-DD
+    if (!byDay[day]) byDay[day] = { scans: 0, inputTokens: 0, outputTokens: 0 };
+    byDay[day].scans += 1;
+    byDay[day].inputTokens += usage.input_tokens;
+    byDay[day].outputTokens += usage.output_tokens;
+  }
+
+  const estimatedCostUsd =
+    totalInputTokens * HAIKU_INPUT_COST_PER_TOKEN + totalOutputTokens * HAIKU_OUTPUT_COST_PER_TOKEN;
+
+  return res.status(200).json({
+    totalScans: receipts?.length ?? 0,
+    totalInputTokens,
+    totalOutputTokens,
+    estimatedCostUsd: Math.round(estimatedCostUsd * 10000) / 10000,
+    byDay: Object.entries(byDay)
+      .map(([date, stats]) => ({ date, ...stats }))
+      .sort((a, b) => (a.date < b.date ? 1 : -1)),
+  });
+});
+
 export default router;

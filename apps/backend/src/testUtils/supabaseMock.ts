@@ -39,7 +39,7 @@ function nextStorageResult() {
 
 function makeBuilder(): any {
   const builder: any = {};
-  ['select', 'eq', 'order', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
+  ['select', 'eq', 'not', 'order', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
     builder[method] = jest.fn(() => builder);
   });
   builder.single = jest.fn(async () => nextResult());
