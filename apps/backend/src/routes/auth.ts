@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '@smartbudget/shared/lib/supabase';
+import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
 
 const router = Router();
 
@@ -22,6 +22,10 @@ interface SignupRequest {
 interface LoginRequest {
   email?: string;
   password?: string;
+}
+
+interface RefreshRequest {
+  refresh_token?: string;
 }
 
 // POST /api/v1/auth/signup
@@ -51,12 +55,14 @@ router.post('/signup', async (req: Request, res: Response) => {
   }
 
   try {
-    // Create user with Supabase auth using admin API for auto-confirmation (MVP)
-    const { data, error } = await supabase.auth.admin.createUser({
+    // Real signup: Supabase sends a confirmation email and the account
+    // can't log in until it's verified (Auth setting "Confirm email",
+    // on by default) — replaces the previous admin.createUser(email_confirm:
+    // true) auto-confirm shortcut.
+    const { data, error } = await supabaseAuth.auth.signUp({
       email,
       password,
-      email_confirm: true, // Auto-confirm email for MVP
-      user_metadata: { name },
+      options: { data: { name } },
     });
 
     if (error) {
@@ -69,6 +75,16 @@ router.post('/signup', async (req: Request, res: Response) => {
       }
       return res.status(400).json({
         error: error.message,
+        status: 400,
+      });
+    }
+
+    // Anti-enumeration behavior: signing up with an email that's already
+    // registered and confirmed returns 200 with a user that has no
+    // identities, rather than an error.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      return res.status(400).json({
+        error: 'Email already registered',
         status: 400,
       });
     }
@@ -110,12 +126,24 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     // Authenticate user
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
+      if (error.message.includes('Email not confirmed')) {
+        return res.status(401).json({
+          error: 'Please verify your email before signing in — check your inbox for the confirmation link.',
+          status: 401,
+        });
+      }
+      if ((error as { code?: string }).code === 'user_banned') {
+        return res.status(403).json({
+          error: 'This account has been suspended.',
+          status: 403,
+        });
+      }
       // Invalid credentials should return 401, not 400
       if (error.message.includes('Invalid login credentials') || error.status === 400) {
         return res.status(401).json({
@@ -156,6 +184,50 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/v1/auth/refresh — exchange a refresh token for a new session,
+// so the mobile app can silently renew an expired access token instead of
+// forcing a full re-login. Mobile never talks to Supabase directly, so this
+// wraps supabaseAuth.auth.refreshSession() the same way /login wraps
+// signInWithPassword().
+router.post('/refresh', async (req: Request, res: Response) => {
+  const { refresh_token } = req.body as RefreshRequest;
+
+  if (!refresh_token) {
+    return res.status(400).json({
+      error: 'Missing required field: refresh_token',
+      status: 400,
+    });
+  }
+
+  try {
+    const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token });
+
+    if (error || !data.session || !data.user) {
+      return res.status(401).json({
+        error: 'Invalid or expired refresh token',
+        status: 401,
+      });
+    }
+
+    return res.status(200).json({
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Refresh error:', err);
+    return res.status(500).json({
+      error: 'Internal server error',
+      status: 500,
+    });
+  }
+});
+
 // POST /api/v1/auth/logout
 router.post('/logout', async (req: Request, res: Response) => {
   // Extract token from Authorization header
@@ -172,7 +244,7 @@ router.post('/logout', async (req: Request, res: Response) => {
   try {
     // Sign out the session using the access token
     // In Supabase v2 with service role, we can use admin.signOut
-    const { error } = await supabase.auth.admin.signOut(token);
+    const { error } = await supabaseAuth.auth.admin.signOut(token);
 
     if (error) {
       console.error('Logout error:', error);

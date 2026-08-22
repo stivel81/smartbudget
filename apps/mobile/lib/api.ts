@@ -65,6 +65,26 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return response.json();
 }
 
+export async function refreshSession(refreshToken: string): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Session expired',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
 export interface ReceiptExtraction {
   merchant: string;
   total: number;
@@ -77,6 +97,7 @@ export interface Receipt {
   user_id: string;
   raw_response: ReceiptExtraction;
   created_at: string;
+  image_path: string | null;
 }
 
 export interface ScanReceiptResponse {
@@ -153,6 +174,25 @@ export async function updateReceipt(
   }
 
   return response.json();
+}
+
+export async function getReceiptImageUrl(id: string, accessToken: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}/image-url`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to load receipt image',
+      code: response.status,
+    } as ApiError;
+  }
+
+  const { url } = await response.json();
+  return url;
 }
 
 export async function deleteReceipt(id: string, accessToken: string): Promise<void> {
@@ -244,6 +284,23 @@ export async function deleteBudget(id: string, accessToken: string): Promise<voi
     const error = await response.json();
     throw {
       message: error.error || 'Failed to delete budget',
+      code: response.status,
+    } as ApiError;
+  }
+}
+
+export async function logout(accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Failed to sign out',
       code: response.status,
     } as ApiError;
   }

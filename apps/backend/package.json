@@ -9,7 +9,21 @@
     "start": "node dist/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "verify:receipt-scan": "ts-node -r dotenv/config scripts/verify-receipt-scan.ts"
+    "verify:receipt-scan": "ts-node -r dotenv/config scripts/verify-receipt-scan.ts",
+    "verify:receipt-image-storage": "ts-node -r dotenv/config scripts/verify-receipt-image-storage.ts",
+    "verify:email-verification": "ts-node -r dotenv/config scripts/verify-email-verification.ts",
+    "verify:admin-users": "ts-node -r dotenv/config scripts/verify-admin-users.ts",
+    "verify:token-refresh": "ts-node -r dotenv/config scripts/verify-token-refresh.ts",
+    "verify:audit-log": "ts-node -r dotenv/config scripts/verify-audit-log.ts",
+    "verify:admin-user-detail": "ts-node -r dotenv/config scripts/verify-admin-user-detail.ts",
+    "verify:admin-grant-revoke": "ts-node -r dotenv/config scripts/verify-admin-grant-revoke.ts",
+    "verify:admin-suspend": "ts-node -r dotenv/config scripts/verify-admin-suspend.ts",
+    "verify:admin-delete-user": "ts-node -r dotenv/config scripts/verify-admin-delete-user.ts",
+    "verify:admin-export": "ts-node -r dotenv/config scripts/verify-admin-export.ts",
+    "verify:admin-usage": "ts-node -r dotenv/config scripts/verify-admin-usage.ts",
+    "verify:rate-limit-violations": "ts-node -r dotenv/config scripts/verify-rate-limit-violations.ts",
+    "verify:admin-failed-scans": "ts-node -r dotenv/config scripts/verify-admin-failed-scans.ts",
+    "verify:admin-audit-log-view": "ts-node -r dotenv/config scripts/verify-admin-audit-log-view.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
@@ -18,6 +32,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.2",
     "ws": "^8.21.3"
   },
   "devDependencies": {

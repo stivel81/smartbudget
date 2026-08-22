@@ -1,12 +1,15 @@
-import React from 'react';
+import React, { useContext, useState } from 'react';
 import {
   StyleSheet,
   Text,
   View,
   SafeAreaView,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AuthContext } from '../App';
 
 const COLORS = {
   primary: '#1D9E75',
@@ -19,6 +22,25 @@ const COLORS = {
 };
 
 export default function ProfileScreen(): React.ReactElement {
+  const auth = useContext(AuthContext);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const email = auth.userEmail || '';
+  const initials = email ? email.slice(0, 2).toUpperCase() : '?';
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await auth.logout();
+      // App.tsx swaps to the auth stack automatically once
+      // isAuthenticated flips to false — no navigation call needed.
+    } catch (err: any) {
+      Alert.alert('Failed to sign out', err.message || 'Please try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -34,10 +56,9 @@ export default function ProfileScreen(): React.ReactElement {
               { backgroundColor: COLORS.primary },
             ]}
           >
-            <Text style={styles.largeAvatarText}>AS</Text>
+            <Text style={styles.largeAvatarText}>{initials}</Text>
           </View>
-          <Text style={styles.userName}>Adrian S.</Text>
-          <Text style={styles.userEmail}>adrian.s@example.com</Text>
+          <Text style={styles.userEmail}>{email}</Text>
         </View>
 
         {/* Menu Items */}
@@ -100,8 +121,17 @@ export default function ProfileScreen(): React.ReactElement {
         </View>
 
         {/* Sign Out Button */}
-        <TouchableOpacity style={styles.signOutButton}>
-          <Text style={styles.signOutButtonText}>Sign Out</Text>
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={handleSignOut}
+          disabled={signingOut}
+          testID="profile-sign-out-button"
+        >
+          {signingOut ? (
+            <ActivityIndicator color="#dc2626" />
+          ) : (
+            <Text style={styles.signOutButtonText}>Sign Out</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -148,11 +178,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 24,
-  },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
   },
   userEmail: {
     fontSize: 14,

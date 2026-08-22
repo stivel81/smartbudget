@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -105,7 +106,10 @@ export default function SignupScreen({ navigation }: Props) {
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       await signup(email, password, fullName);
-      // On success, navigate to Login screen
+      Alert.alert(
+        'Check your email',
+        `We sent a verification link to ${email}. Verify your email before signing in.`
+      );
       navigation.reset({
         index: 0,
         routes: [{ name: 'Login' }],

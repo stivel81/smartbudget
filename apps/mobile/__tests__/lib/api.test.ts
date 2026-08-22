@@ -1,4 +1,4 @@
-import { login, signup, scanReceipt, getReceipts } from '../../lib/api';
+import { login, signup, scanReceipt, getReceipts, refreshSession } from '../../lib/api';
 
 function mockFetchOnce(status: number, body: unknown) {
   global.fetch = jest.fn().mockResolvedValue({
@@ -28,6 +28,26 @@ describe('lib/api', () => {
 
       await expect(login('a@b.com', 'wrong')).rejects.toMatchObject({
         message: 'Invalid email or password',
+        code: 401,
+      });
+    });
+  });
+
+  describe('refreshSession', () => {
+    it('returns the new session on success', async () => {
+      const session = { access_token: 'new-tok', refresh_token: 'new-ref', user: { id: '1', email: 'a@b.com' } };
+      mockFetchOnce(200, { session });
+
+      const result = await refreshSession('old-ref');
+
+      expect(result.session).toEqual(session);
+    });
+
+    it('throws the backend error message when the refresh token is invalid', async () => {
+      mockFetchOnce(401, { error: 'Invalid or expired refresh token', status: 401 });
+
+      await expect(refreshSession('bad-ref')).rejects.toMatchObject({
+        message: 'Invalid or expired refresh token',
         code: 401,
       });
     });

@@ -8,13 +8,19 @@
  */
 
 let resultQueue: any[] = [];
+let storageResultQueue: any[] = [];
 
 export function queueResult(result: unknown) {
   resultQueue.push(result);
 }
 
+export function queueStorageResult(result: unknown) {
+  storageResultQueue.push(result);
+}
+
 export function resetQueue() {
   resultQueue = [];
+  storageResultQueue = [];
 }
 
 function nextResult() {
@@ -24,9 +30,16 @@ function nextResult() {
   return resultQueue.shift();
 }
 
+function nextStorageResult() {
+  if (storageResultQueue.length === 0) {
+    throw new Error('supabaseMock: no storage result queued for this call');
+  }
+  return storageResultQueue.shift();
+}
+
 function makeBuilder(): any {
   const builder: any = {};
-  ['select', 'eq', 'order', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
+  ['select', 'eq', 'in', 'not', 'order', 'limit', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
     builder[method] = jest.fn(() => builder);
   });
   builder.single = jest.fn(async () => nextResult());
@@ -43,7 +56,49 @@ export const mockGetUser = jest.fn(async (token: string) => {
   return { data: { user: null }, error: { message: 'Invalid token' } };
 });
 
+// Admin-API mocks used by the admin routes (user detail, suspend, delete).
+// Configure per-test with mockResolvedValueOnce.
+export const mockGetUserById = jest.fn();
+export const mockUpdateUserById = jest.fn();
+export const mockDeleteUserAdmin = jest.fn();
+export const mockListUsers = jest.fn();
+
 export const supabase = {
-  auth: { getUser: mockGetUser },
+  auth: {
+    getUser: mockGetUser,
+    admin: {
+      getUserById: mockGetUserById,
+      updateUserById: mockUpdateUserById,
+      deleteUser: mockDeleteUserAdmin,
+      listUsers: mockListUsers,
+    },
+  },
   from: jest.fn(() => makeBuilder()),
+  storage: {
+    from: jest.fn(() => ({
+      upload: jest.fn(async () => nextStorageResult()),
+      remove: jest.fn(async () => nextStorageResult()),
+      createSignedUrl: jest.fn(async () => nextStorageResult()),
+    })),
+  },
+};
+
+// requireAuth verifies bearer tokens, and routes/auth.ts signs up/in/out,
+// via a separate client instance (see packages/shared/lib/supabaseAuth.ts)
+// — mocked here too so routes under test resolve the same way regardless
+// of which client they use. Auth tests configure these per-test with
+// mockResolvedValueOnce rather than the queue pattern above.
+export const mockSignUp = jest.fn();
+export const mockSignInWithPassword = jest.fn();
+export const mockRefreshSession = jest.fn();
+export const mockAdminSignOut = jest.fn();
+
+export const supabaseAuth = {
+  auth: {
+    getUser: mockGetUser,
+    signUp: mockSignUp,
+    signInWithPassword: mockSignInWithPassword,
+    refreshSession: mockRefreshSession,
+    admin: { signOut: mockAdminSignOut },
+  },
 };
