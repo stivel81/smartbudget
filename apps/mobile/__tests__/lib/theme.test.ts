@@ -58,13 +58,22 @@ describe('lib/theme', () => {
     });
   });
 
-  describe('No hardcoded color literals in screen files', () => {
-    const screensDir = path.join(__dirname, '../../screens');
-    const screenFiles = fs.readdirSync(screensDir).filter((f) => f.endsWith('.tsx'));
+  describe('No hardcoded color literals in screen/component files', () => {
+    // Shared UI components (components/) are held to the same rule as screens.
+    const uiFiles = ['screens', 'components'].flatMap((dir) => {
+      const absDir = path.join(__dirname, '../..', dir);
+      return fs
+        .readdirSync(absDir)
+        .filter((f) => f.endsWith('.tsx'))
+        .map((f) => ({ filename: `${dir}/${f}`, filePath: path.join(absDir, f) }));
+    });
 
-    screenFiles.forEach((filename) => {
+    it('scans at least one component file', () => {
+      expect(uiFiles.some((f) => f.filename.startsWith('components/'))).toBe(true);
+    });
+
+    uiFiles.forEach(({ filename, filePath }) => {
       it(`${filename} should not contain hardcoded hex/rgb/rgba color literals`, () => {
-        const filePath = path.join(screensDir, filename);
         const content = fs.readFileSync(filePath, 'utf-8');
 
         const lines = content.split('\n');
