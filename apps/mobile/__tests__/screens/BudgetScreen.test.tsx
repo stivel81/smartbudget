@@ -555,4 +555,42 @@ describe('BudgetScreen', () => {
       expect(StyleSheet.flatten(screen.getByTestId('budget-remaining').props.style).color).toBe(COLORS.success);
     });
   });
+
+  describe('header (spec: white bg, full-bleed)', () => {
+    async function renderSettled() {
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      renderBudget();
+      await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+    }
+
+    it('gives the header a white (surface) background', async () => {
+      await renderSettled();
+      expect(StyleSheet.flatten(screen.getByTestId('budget-header').props.style).backgroundColor).toBe(COLORS.surface);
+    });
+
+    it('makes the + button visible: its bg differs from the header bg', async () => {
+      await renderSettled();
+      const headerBg = StyleSheet.flatten(screen.getByTestId('budget-header').props.style).backgroundColor;
+      const addBg = StyleSheet.flatten(screen.getByTestId('budget-add-button').props.style).backgroundColor;
+      expect(addBg).toBe(COLORS.background); // spec: 30px #f2f2f7 circle
+      expect(addBg).not.toBe(headerBg);
+    });
+
+    it('is full-bleed: white safe area (status bar strip) and no horizontal inset', async () => {
+      await renderSettled();
+      const root = StyleSheet.flatten(screen.getByTestId('budget-screen').props.style);
+      const header = StyleSheet.flatten(screen.getByTestId('budget-header').props.style);
+      expect(root.backgroundColor).toBe(COLORS.surface);
+      expect(root.padding ?? root.paddingHorizontal ?? 0).toBe(0);
+      expect(header.margin ?? header.marginHorizontal ?? 0).toBe(0);
+    });
+
+    it('keeps the page below the header grey', async () => {
+      await renderSettled();
+      expect(StyleSheet.flatten(screen.getByTestId('budget-scroll').props.style).backgroundColor).toBe(
+        COLORS.background
+      );
+    });
+  });
 });

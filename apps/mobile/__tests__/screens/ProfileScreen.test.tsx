@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 // Render icons as plain Views tagged by glyph name: avoids the async
@@ -15,6 +15,7 @@ jest.mock('@expo/vector-icons', () => {
 
 import ProfileScreen from '../../screens/ProfileScreen';
 import { AuthContext, AuthContextType } from '../../lib/auth';
+import { COLORS } from '../../lib/theme';
 
 function renderProfile(overrides: Partial<AuthContextType> = {}) {
   const value: AuthContextType = {
@@ -141,5 +142,27 @@ describe('ProfileScreen', () => {
     fireEvent.press(screen.getByTestId('profile-sign-out-button'));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to sign out', 'Please try again.'));
+  });
+
+  describe('header (white bg, full-bleed — consistent with Dashboard/Budget)', () => {
+    it('gives the header a white (surface) background that differs from the avatar bg', () => {
+      renderProfile();
+      const headerBg = StyleSheet.flatten(screen.getByTestId('profile-header').props.style).backgroundColor;
+      const avatarBg = StyleSheet.flatten(screen.getByTestId('profile-avatar').props.style).backgroundColor;
+      expect(headerBg).toBe(COLORS.surface);
+      expect(avatarBg).not.toBe(headerBg);
+    });
+
+    it('is full-bleed with a white safe area and a grey page below', () => {
+      renderProfile();
+      const root = StyleSheet.flatten(screen.getByTestId('profile-screen').props.style);
+      const header = StyleSheet.flatten(screen.getByTestId('profile-header').props.style);
+      expect(root.backgroundColor).toBe(COLORS.surface);
+      expect(root.padding ?? root.paddingHorizontal ?? 0).toBe(0);
+      expect(header.margin ?? header.marginHorizontal ?? 0).toBe(0);
+      expect(StyleSheet.flatten(screen.getByTestId('profile-scroll').props.style).backgroundColor).toBe(
+        COLORS.background
+      );
+    });
   });
 });

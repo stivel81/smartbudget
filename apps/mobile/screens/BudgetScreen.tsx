@@ -203,22 +203,31 @@ export default function BudgetScreen(): React.ReactElement {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
+    // White safe area so the status-bar strip matches the white header.
+    <SafeAreaView style={styles.safeArea} testID="budget-screen">
+      {/* Header — full-bleed white bar (spec), so the grey + button shows */}
+      <View style={styles.header} testID="budget-header">
+        <View>
+          <Text style={styles.monthText}>{currentMonth}</Text>
+          <Text style={styles.title}>Budget</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={openAddModal}
+          accessibilityRole="button"
+          accessibilityLabel="Add budget"
+          testID="budget-add-button"
+        >
+          <MaterialCommunityIcons name="plus" size={24} color={COLORS.button} />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        testID="budget-scroll"
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.monthText}>{currentMonth}</Text>
-            <Text style={styles.title}>Budget</Text>
-          </View>
-          <TouchableOpacity style={styles.addButton} onPress={openAddModal} testID="budget-add-button">
-            <MaterialCommunityIcons name="plus" size={24} color={COLORS.button} />
-          </TouchableOpacity>
-        </View>
 
         {loading && (
           <View style={styles.loadingContainer}>
@@ -354,11 +363,16 @@ export default function BudgetScreen(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
   contentContainer: {
+    paddingTop: 12,
     paddingBottom: 20,
   },
   header: {
@@ -368,6 +382,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 16,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
   },
   monthText: {
     fontSize: 12,

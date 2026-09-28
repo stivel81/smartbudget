@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet } from 'react-native';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react-native';
 import { budgetBarColor, COLORS } from '../../lib/theme';
 
 jest.mock('@react-navigation/native', () => {
@@ -686,6 +686,104 @@ describe('DashboardScreen', () => {
       // Let the image URL request settle inside the test.
       expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token');
       await waitFor(() => expect(screen.UNSAFE_getByType(Image).props.source).toEqual({ uri: 'https://example.com/r1.jpg' }));
+    });
+  });
+
+  describe('header (spec: white bg, full-bleed)', () => {
+    async function renderSettled() {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      renderDashboard({ userEmail: 'adrian@example.com' });
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    }
+
+    it('gives the header a white (surface) background', async () => {
+      await renderSettled();
+      expect(StyleSheet.flatten(screen.getByTestId('dashboard-header').props.style).backgroundColor).toBe(
+        COLORS.surface
+      );
+    });
+
+    it('makes the avatar circle visible: its bg differs from the header bg', async () => {
+      await renderSettled();
+      const headerBg = StyleSheet.flatten(screen.getByTestId('dashboard-header').props.style).backgroundColor;
+      const avatarBg = StyleSheet.flatten(screen.getByTestId('dashboard-avatar').props.style).backgroundColor;
+      expect(avatarBg).toBe(COLORS.background); // spec: #f2f2f7 circle
+      expect(avatarBg).not.toBe(headerBg);
+    });
+
+    it('shows black initials on the grey avatar (not black-on-black)', async () => {
+      await renderSettled();
+      const initials = screen.getByText('AD');
+      const avatarBg = StyleSheet.flatten(screen.getByTestId('dashboard-avatar').props.style).backgroundColor;
+      expect(StyleSheet.flatten(initials.props.style).color).toBe(COLORS.textPrimary);
+      expect(StyleSheet.flatten(initials.props.style).color).not.toBe(avatarBg);
+    });
+
+    it('is full-bleed: white safe area (status bar strip) and no horizontal inset', async () => {
+      await renderSettled();
+      const root = StyleSheet.flatten(screen.getByTestId('dashboard-screen').props.style);
+      const header = StyleSheet.flatten(screen.getByTestId('dashboard-header').props.style);
+      expect(root.backgroundColor).toBe(COLORS.surface);
+      expect(root.padding ?? root.paddingHorizontal ?? 0).toBe(0);
+      expect(header.margin ?? header.marginHorizontal ?? 0).toBe(0);
+      expect(header.borderRadius).toBeUndefined();
+    });
+
+    it('keeps the page below the header grey', async () => {
+      await renderSettled();
+      expect(StyleSheet.flatten(screen.getByTestId('dashboard-scroll').props.style).backgroundColor).toBe(
+        COLORS.background
+      );
+    });
+  });
+
+  describe('category grid (2 columns)', () => {
+    const FIVE = ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health'];
+
+    async function renderCategories(categories: string[]) {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [
+          receipt('r1', {
+            date: '2026-01-05',
+            total: categories.length * 10,
+            // distinct amounts so the sort order is deterministic
+            items: categories.map((category, i) => ({ name: category, amount: 100 - i, category })),
+          }),
+        ],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      renderDashboard();
+      await waitFor(() => expect(screen.getByTestId(`category-card-${categories[categories.length - 1]}`)).toBeTruthy());
+    }
+
+    it('keeps the last card of an odd count (5) the same half width as the others', async () => {
+      await renderCategories(FIVE);
+      const widths = FIVE.map((c) => StyleSheet.flatten(screen.getByTestId(`category-card-${c}`).props.style).width);
+      expect(widths).toEqual(['48%', '48%', '48%', '48%', '48%']);
+      const last = StyleSheet.flatten(screen.getByTestId('category-card-Health').props.style);
+      // Nothing may let it grow into the empty second column.
+      expect(last.flex).toBeUndefined();
+      expect(last.flexGrow).toBeUndefined();
+      expect(last.minWidth).toBeUndefined();
+      expect(last.alignSelf).toBeUndefined();
+    });
+
+    it('renders the cards in the wrapping 2-column grid container', async () => {
+      await renderCategories(FIVE);
+      const gridEl = screen.getByTestId('category-grid');
+      for (const c of FIVE) expect(within(gridEl).getByTestId(`category-card-${c}`)).toBeTruthy();
+      const grid = StyleSheet.flatten(gridEl.props.style);
+      expect(grid.flexDirection).toBe('row');
+      expect(grid.flexWrap).toBe('wrap');
+      // Gutter from space-between (not a fixed px gap) so 2 × 48% always fits.
+      expect(grid.justifyContent).toBe('space-between');
+      expect(grid.columnGap ?? grid.gap).toBeUndefined();
+    });
+
+    it('a single category card is also half width', async () => {
+      await renderCategories(['Groceries']);
+      expect(StyleSheet.flatten(screen.getByTestId('category-card-Groceries').props.style).width).toBe('48%');
     });
   });
 });

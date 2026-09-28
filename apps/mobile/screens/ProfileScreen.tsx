@@ -46,15 +46,22 @@ export default function ProfileScreen(): React.ReactElement {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.caption}>Account</Text>
-          <Text style={styles.title} accessibilityRole="header">
-            Profile
-          </Text>
-        </View>
+    // White safe area so the status-bar strip matches the white header.
+    <SafeAreaView style={styles.safeArea} testID="profile-screen">
+      {/* Header — full-bleed white bar, same as Dashboard/Budget */}
+      <View style={styles.header} testID="profile-header">
+        <Text style={styles.caption}>Account</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          Profile
+        </Text>
+      </View>
+
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        testID="profile-scroll"
+      >
 
         {/* User card */}
         <View style={styles.card}>
@@ -110,17 +117,26 @@ export default function ProfileScreen(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
   content: {
     paddingHorizontal: SPACING.screenPadding,
+    paddingTop: SPACING.sectionMargin,
     paddingBottom: 24,
   },
   header: {
+    paddingHorizontal: SPACING.screenPadding,
     paddingTop: 12,
     paddingBottom: 16,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
   },
   caption: {
     fontFamily: FONT_FAMILY,

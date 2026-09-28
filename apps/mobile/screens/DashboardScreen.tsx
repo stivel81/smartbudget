@@ -35,8 +35,10 @@ function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
 }
 
+// Spec (Screen 3): 34px circle, #f2f2f7 bg, black initials — visible because
+// the header it sits on is white (COLORS.surface).
 const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
-  <View style={[styles.avatar, { backgroundColor: COLORS.button }]}>
+  <View style={styles.avatar} testID="dashboard-avatar">
     <Text style={styles.avatarText}>{initials}</Text>
   </View>
 );
@@ -54,7 +56,7 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
   const barColor = budget ? budgetBarColor(displayPercentage) : COLORS.success;
 
   return (
-    <View style={styles.categoryCard}>
+    <View style={styles.categoryCard} testID={`category-card-${item.category}`}>
       <View style={[styles.categoryIconContainer, { backgroundColor: meta.backgroundColor }]}>
         <MaterialCommunityIcons name={meta.icon as any} size={24} color={meta.color} />
       </View>
@@ -209,20 +211,24 @@ export default function DashboardScreen(): React.ReactElement {
   const budgetsByCategory = indexBudgetsByCategory(budgets);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
+    // White safe area so the status-bar strip matches the white header
+    // (spec: "iOS status bar (white)"); the grey page starts below it.
+    <SafeAreaView style={styles.safeArea} testID="dashboard-screen">
+      {/* Header — full-bleed white bar, fixed above the scrolling content */}
+      <View style={styles.header} testID="dashboard-header">
+        <View style={{ flex: 1 }}>
+          <Text style={styles.greeting} testID="dashboard-greeting">{greetingFor(now)}</Text>
+          <Text style={styles.title}>My Finances</Text>
+        </View>
+        <Avatar initials={auth.userEmail ? auth.userEmail.substring(0, 2).toUpperCase() : 'U'} />
+      </View>
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        testID="dashboard-scroll"
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.greeting} testID="dashboard-greeting">{greetingFor(now)}</Text>
-            <Text style={styles.title}>My Finances</Text>
-          </View>
-          <Avatar initials={auth.userEmail ? auth.userEmail.substring(0, 2).toUpperCase() : 'U'} />
-        </View>
 
         {/* Balance Card (Hero) */}
         <LinearGradient
@@ -281,7 +287,7 @@ export default function DashboardScreen(): React.ReactElement {
         {!loading && categoryTotals.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Spending by Category</Text>
-            <View style={styles.categoryGrid}>
+            <View style={styles.categoryGrid} testID="category-grid">
               {categoryTotals.map((item) => (
                 <CategoryItem
                   key={item.category}
@@ -316,11 +322,16 @@ export default function DashboardScreen(): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
   contentContainer: {
+    paddingTop: 12,
     paddingBottom: 20,
   },
   header: {
@@ -330,6 +341,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 16,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
   },
   greeting: {
     fontSize: 12,
@@ -446,14 +460,17 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: 12,
   },
+  // Fixed 2-column grid: every card is exactly 48% wide (never flex-grows),
+  // so an odd last card stays half-width instead of stretching. The 4%
+  // column gutter comes from space-between, so two cards always fit.
   categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'space-between',
+    rowGap: 12,
   },
   categoryCard: {
-    flex: 1,
-    minWidth: '48%',
+    width: '48%',
     backgroundColor: COLORS.surface,
     borderRadius: 14,
     padding: 12,
