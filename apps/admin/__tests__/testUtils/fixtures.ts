@@ -61,6 +61,7 @@ export function makeUser(overrides: Partial<AdminUserSummary> = {}): AdminUserSu
     name: 'Alice Smith',
     created_at: '2026-03-04T10:00:00Z',
     is_admin: false,
+    banned_until: null,
     ...overrides,
   };
 }

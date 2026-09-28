@@ -113,6 +113,7 @@ describe('FilterPill', () => {
     render(<FilterPill label="All" active onClick={() => {}} />);
     const pill = screen.getByRole('button', { name: 'All' });
     expect(pill).toHaveStyle({ background: COLORS.purple, color: '#ffffff' });
+    expect(pill).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders the inactive variant and calls onClick', async () => {
@@ -120,6 +121,7 @@ describe('FilterPill', () => {
     render(<FilterPill label="Admins" active={false} onClick={onClick} />);
     const pill = screen.getByRole('button', { name: 'Admins' });
     expect(pill).toHaveStyle({ background: COLORS.surface, color: COLORS.textSecondary });
+    expect(pill).toHaveAttribute('aria-pressed', 'false');
     await userEvent.click(pill);
     expect(onClick).toHaveBeenCalledTimes(1);
   });

@@ -45,6 +45,8 @@ export interface AdminUserSummary {
   name: string | null;
   created_at: string;
   is_admin: boolean;
+  /** Set (to a future timestamp) while the account is suspended. */
+  banned_until: string | null;
 }
 
 export function getUsers(accessToken: string): Promise<{ users: AdminUserSummary[] }> {
@@ -53,7 +55,6 @@ export function getUsers(accessToken: string): Promise<{ users: AdminUserSummary
 
 export interface AdminUserDetail extends AdminUserSummary {
   email_confirmed_at: string | null;
-  banned_until: string | null;
 }
 
 export interface AdminUserStats {

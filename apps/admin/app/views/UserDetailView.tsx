@@ -6,23 +6,15 @@ import {
   getUserReceipts,
   grantAdmin,
   revokeAdmin,
-  suspendUser,
-  unsuspendUser,
-  deleteUserData,
   exportUserData,
   AdminUserDetail,
   AdminUserStats,
   AdminBudget,
   AdminReceipt,
 } from '../../lib/api';
-import {
-  buttonStyle,
-  cardStyle,
-  cellStyle,
-  dangerButtonStyle,
-  inputStyle,
-  secondaryButtonStyle,
-} from '../../lib/styles';
+import { buttonStyle, cardStyle, cellStyle, dangerButtonStyle, secondaryButtonStyle } from '../../lib/styles';
+import { isSuspended, toggleSuspension } from '../../lib/users';
+import DeleteUserConfirm from '../components/DeleteUserConfirm';
 
 export default function UserDetailView({
   accessToken,
@@ -42,9 +34,6 @@ export default function UserDetailView({
   const [actionError, setActionError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
 
   const loadDetail = () => {
     setLoading(true);
@@ -113,11 +102,7 @@ export default function UserDetailView({
     setActionError('');
     setActionLoading(true);
     try {
-      if (user.banned_until) {
-        await unsuspendUser(userId, accessToken);
-      } else {
-        await suspendUser(userId, accessToken);
-      }
+      await toggleSuspension(user, accessToken, new Date());
       await loadDetail();
     } catch (err: any) {
       setActionError(err.message || 'Action failed');
@@ -126,18 +111,7 @@ export default function UserDetailView({
     }
   };
 
-  const handleDelete = async () => {
-    if (!user || deleteConfirmText !== user.email) return;
-    setDeleteError('');
-    setDeleting(true);
-    try {
-      await deleteUserData(userId, accessToken);
-      onBack();
-    } catch (err: any) {
-      setDeleteError(err.message || 'Failed to delete user data');
-      setDeleting(false);
-    }
-  };
+  const suspended = user ? isSuspended(user, new Date()) : false;
 
   return (
     <div>
@@ -155,7 +129,7 @@ export default function UserDetailView({
             <p>Name: {user.name || '—'}</p>
             <p>Joined: {new Date(user.created_at).toLocaleString()}</p>
             <p>Email verified: {user.email_confirmed_at ? 'Yes' : 'No'}</p>
-            <p>Status: {user.banned_until ? `Suspended until ${new Date(user.banned_until).toLocaleString()}` : 'Active'}</p>
+            <p>Status: {suspended ? `Suspended until ${new Date(user.banned_until as string).toLocaleString()}` : 'Active'}</p>
             <p>Admin: {user.is_admin ? 'Yes' : 'No'}</p>
 
             {actionError && <p style={{ color: '#dc2626', fontSize: 14 }}>{actionError}</p>}
@@ -167,9 +141,9 @@ export default function UserDetailView({
               <button
                 onClick={handleToggleSuspend}
                 disabled={actionLoading}
-                style={user.banned_until ? buttonStyle : dangerButtonStyle}
+                style={suspended ? buttonStyle : dangerButtonStyle}
               >
-                {actionLoading ? 'Working...' : user.banned_until ? 'Unsuspend' : 'Suspend'}
+                {actionLoading ? 'Working...' : suspended ? 'Unsuspend' : 'Suspend'}
               </button>
               <button onClick={handleExport} disabled={actionLoading} style={secondaryButtonStyle}>
                 {actionLoading ? 'Working...' : 'Export data (GDPR)'}
@@ -230,39 +204,12 @@ export default function UserDetailView({
                 Delete all data
               </button>
             ) : (
-              <div>
-                <p style={{ fontSize: 14 }}>
-                  Type <strong>{user.email}</strong> to confirm:
-                </p>
-                <input
-                  type="text"
-                  value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
-                  style={{ ...inputStyle, maxWidth: 320, marginBottom: 8 }}
-                  data-testid="delete-confirm-input"
-                />
-                {deleteError && <p style={{ color: '#dc2626', fontSize: 14 }}>{deleteError}</p>}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting || deleteConfirmText !== user.email}
-                    style={dangerButtonStyle}
-                  >
-                    {deleting ? 'Deleting...' : 'Confirm permanent deletion'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowDeleteConfirm(false);
-                      setDeleteConfirmText('');
-                      setDeleteError('');
-                    }}
-                    disabled={deleting}
-                    style={secondaryButtonStyle}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              <DeleteUserConfirm
+                user={user}
+                accessToken={accessToken}
+                onDeleted={onBack}
+                onCancel={() => setShowDeleteConfirm(false)}
+              />
             )}
           </div>
         </div>

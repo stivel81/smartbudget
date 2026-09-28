@@ -154,6 +154,16 @@ describe('UserDetailView — suspend', () => {
     expect(mocked.suspendUser).not.toHaveBeenCalled();
   });
 
+  it('treats a lapsed ban as active (offers Suspend, status Active)', async () => {
+    mockDetail(makeUserDetail({ banned_until: '2020-01-01T00:00:00Z' }));
+    mocked.suspendUser.mockResolvedValue(undefined);
+    renderView();
+    expect(await screen.findByText('Status: Active')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Suspend' }));
+    expect(mocked.suspendUser).toHaveBeenCalledWith('u1', 'tok');
+    expect(mocked.unsuspendUser).not.toHaveBeenCalled();
+  });
+
   it('shows a suspend error', async () => {
     mockDetail();
     mocked.suspendUser.mockRejectedValue({ message: 'You cannot suspend your own account' });

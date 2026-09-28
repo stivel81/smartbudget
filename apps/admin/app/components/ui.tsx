@@ -199,6 +199,7 @@ export function FilterPill({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       style={{
         fontFamily: FONT_FAMILY,
         fontSize: 11,

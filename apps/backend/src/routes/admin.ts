@@ -6,7 +6,22 @@ import { logAdminAction } from '../services/auditLog';
 
 const router = Router();
 
-// GET /api/v1/admin/users — read-only user list for the admin dashboard.
+const AUTH_USERS_PAGE_SIZE = 1000; // GoTrue admin API max per page
+
+// Suspension lives on auth.users (banned_until), not public.profiles, so the
+// list merges it in from the admin API. Pages through every auth user.
+async function fetchBannedUntilById(): Promise<Map<string, string | null>> {
+  const bannedUntilById = new Map<string, string | null>();
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: AUTH_USERS_PAGE_SIZE });
+    if (error) throw error;
+    for (const u of data.users) bannedUntilById.set(u.id, u.banned_until ?? null);
+    if (data.users.length < AUTH_USERS_PAGE_SIZE) return bannedUntilById;
+  }
+}
+
+// GET /api/v1/admin/users — read-only user list for the admin dashboard,
+// including each account's suspension state (banned_until).
 router.get('/users', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
   const { data, error } = await supabase
     .from('profiles')
@@ -18,7 +33,17 @@ router.get('/users', requireAuth, requireAdmin, async (_req: AuthedRequest, res:
     return res.status(500).json({ error: 'Failed to fetch users', status: 500 });
   }
 
-  return res.status(200).json({ users: data });
+  let bannedUntilById: Map<string, string | null>;
+  try {
+    bannedUntilById = await fetchBannedUntilById();
+  } catch (authError) {
+    console.error('Failed to fetch auth users:', authError);
+    return res.status(500).json({ error: 'Failed to fetch users', status: 500 });
+  }
+
+  const users = (data ?? []).map((p) => ({ ...p, banned_until: bannedUntilById.get(p.id) ?? null }));
+
+  return res.status(200).json({ users });
 });
 
 // GET /api/v1/admin/users/:id — profile + auth status + spend/budget summary.

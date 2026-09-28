@@ -16,6 +16,7 @@ import {
   mockGetUserById,
   mockUpdateUserById,
   mockDeleteUserAdmin,
+  mockListUsers,
 } from '../testUtils/supabaseMock';
 
 beforeEach(() => {
@@ -30,6 +31,7 @@ describe('GET /api/v1/admin/users', () => {
       data: [{ id: 'user-123', email: 'a@b.com', name: 'A', created_at: '2026-01-01', is_admin: true }],
       error: null,
     }); // users select
+    mockListUsers.mockResolvedValueOnce({ data: { users: [{ id: 'user-123', banned_until: null }] }, error: null });
 
     const response = await request(app)
       .get('/api/v1/admin/users')
@@ -37,6 +39,92 @@ describe('GET /api/v1/admin/users', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.users).toHaveLength(1);
+    expect(response.body.users[0].banned_until).toBeNull();
+  });
+
+  it('merges banned_until from auth users so suspended accounts can be filtered', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [
+        { id: 'user-1', email: 'a@b.com', name: 'A', created_at: '2026-01-02', is_admin: false },
+        { id: 'user-2', email: 'c@d.com', name: 'C', created_at: '2026-01-01', is_admin: false },
+        { id: 'user-3', email: 'e@f.com', name: 'E', created_at: '2026-01-01', is_admin: false },
+      ],
+      error: null,
+    }); // users select
+    mockListUsers.mockResolvedValueOnce({
+      data: {
+        users: [
+          { id: 'user-1', banned_until: '2126-01-01T00:00:00Z' },
+          { id: 'user-2' }, // no banned_until field at all
+          // user-3 has no auth row (e.g. mid-deletion) — defaults to null
+        ],
+      },
+      error: null,
+    });
+
+    const response = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.users.map((u: any) => [u.id, u.banned_until])).toEqual([
+      ['user-1', '2126-01-01T00:00:00Z'],
+      ['user-2', null],
+      ['user-3', null],
+    ]);
+    expect(mockListUsers).toHaveBeenCalledWith({ page: 1, perPage: 1000 });
+  });
+
+  it('pages through all auth users', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [{ id: 'user-1001', email: 'x@y.com', name: 'X', created_at: '2026-01-01', is_admin: false }],
+      error: null,
+    }); // users select
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({ id: `user-${i}`, banned_until: null }));
+    mockListUsers
+      .mockResolvedValueOnce({ data: { users: fullPage }, error: null })
+      .mockResolvedValueOnce({ data: { users: [{ id: 'user-1001', banned_until: '2126-01-01T00:00:00Z' }] }, error: null });
+
+    const response = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(mockListUsers).toHaveBeenCalledTimes(2);
+    expect(mockListUsers).toHaveBeenNthCalledWith(2, { page: 2, perPage: 1000 });
+    expect(response.body.users[0].banned_until).toBe('2126-01-01T00:00:00Z');
+  });
+
+  it('returns 500 when the profiles query fails', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: null, error: { message: 'db down' } }); // users select
+    jest.spyOn(console, 'error').mockImplementationOnce(() => {});
+
+    const response = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(500);
+    expect(mockListUsers).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the auth admin user list fails', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [{ id: 'user-1', email: 'a@b.com', name: 'A', created_at: '2026-01-01', is_admin: false }],
+      error: null,
+    }); // users select
+    mockListUsers.mockResolvedValueOnce({ data: { users: [] }, error: { message: 'auth down' } });
+    jest.spyOn(console, 'error').mockImplementationOnce(() => {});
+
+    const response = await request(app)
+      .get('/api/v1/admin/users')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('Failed to fetch users');
   });
 
   it('returns 403 for a non-admin caller', async () => {
