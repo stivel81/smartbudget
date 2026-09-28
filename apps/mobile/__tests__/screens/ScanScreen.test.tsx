@@ -1,4 +1,5 @@
 import React from 'react';
+import { Animated } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 jest.mock('@react-navigation/native', () => {
@@ -73,7 +74,22 @@ function renderScan() {
 }
 
 describe('ScanScreen', () => {
+  let sequenceSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    // The scan-line animation restarts itself forever from its completion
+    // callback (via requestAnimationFrame -> setTimeout in the RN jest preset),
+    // so timers keep firing after the test environment is torn down. Stub the
+    // looping sequence out; it is purely decorative.
+    sequenceSpy = jest.spyOn(Animated, 'sequence').mockReturnValue({
+      start: jest.fn(),
+      stop: jest.fn(),
+      reset: jest.fn(),
+    } as unknown as Animated.CompositeAnimation);
+  });
+
   afterEach(() => {
+    sequenceSpy.mockRestore();
     jest.clearAllMocks();
   });
 
