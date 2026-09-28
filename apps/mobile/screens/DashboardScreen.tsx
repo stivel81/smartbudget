@@ -35,7 +35,7 @@ function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
 }
 
-// Spec (Screen 3): 34px circle, #f2f2f7 bg, black initials — visible because
+// Spec (Screen 3): 34px circle, light-grey (COLORS.background) bg, black initials — visible because
 // the header it sits on is white (COLORS.surface).
 const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
   <View style={styles.avatar} testID="dashboard-avatar">
