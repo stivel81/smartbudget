@@ -350,6 +350,97 @@ router.get('/usage', requireAuth, requireAdmin, async (_req: AuthedRequest, res:
   });
 });
 
+// GET /api/v1/admin/scan-log — a combined feed of recent scan attempts
+// (successful receipts + scan_failures) across all users, newest first, for
+// the AI Monitor screen. Same admin_id -> email batch-resolve pattern as
+// audit-log, since neither source table carries email directly. Failed
+// scans have no token/cost data — scanReceipt() throws before Claude
+// returns usage, so nothing was ever captured for those rows.
+interface ScanLogEntry {
+  id: string;
+  userId: string;
+  email: string | null;
+  createdAt: string;
+  status: 'success' | 'failed';
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
+router.get('/scan-log', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
+  const [
+    { data: receipts, error: receiptsError },
+    { data: failures, error: failuresError },
+  ] = await Promise.all([
+    supabase
+      .from('receipts')
+      .select('id, user_id, created_at, claude_usage')
+      .not('claude_usage', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    supabase
+      .from('scan_failures')
+      .select('id, user_id, created_at, error_message')
+      .order('created_at', { ascending: false })
+      .limit(100),
+  ]);
+
+  if (receiptsError || failuresError) {
+    console.error('Failed to fetch scan log:', receiptsError || failuresError);
+    return res.status(500).json({ error: 'Failed to fetch scan log', status: 500 });
+  }
+
+  const userIds = [
+    ...new Set([...(receipts ?? []).map((r: any) => r.user_id), ...(failures ?? []).map((f: any) => f.user_id)]),
+  ];
+  const { data: profiles, error: profilesError } =
+    userIds.length > 0
+      ? await supabase.from('profiles').select('id, email').in('id', userIds)
+      : { data: [] as { id: string; email: string | null }[], error: null };
+
+  if (profilesError) {
+    console.error('Failed to fetch user emails for scan log:', profilesError);
+    return res.status(500).json({ error: 'Failed to fetch scan log', status: 500 });
+  }
+
+  const emailById = new Map((profiles ?? []).map((p) => [p.id, p.email]));
+
+  const successEntries: ScanLogEntry[] = (receipts ?? []).map((r: any) => {
+    const usage = r.claude_usage as ClaudeUsageRow;
+    const costUsd = usage.input_tokens * HAIKU_INPUT_COST_PER_TOKEN + usage.output_tokens * HAIKU_OUTPUT_COST_PER_TOKEN;
+    return {
+      id: r.id,
+      userId: r.user_id,
+      email: emailById.get(r.user_id) ?? null,
+      createdAt: r.created_at,
+      status: 'success',
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      costUsd: Math.round(costUsd * 10000) / 10000,
+      error: null,
+    };
+  });
+
+  const failureEntries: ScanLogEntry[] = (failures ?? []).map((f: any) => ({
+    id: f.id,
+    userId: f.user_id,
+    email: emailById.get(f.user_id) ?? null,
+    createdAt: f.created_at,
+    status: 'failed',
+    inputTokens: null,
+    outputTokens: null,
+    costUsd: null,
+    error: f.error_message,
+  }));
+
+  const log = [...successEntries, ...failureEntries]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, 100);
+
+  return res.status(200).json({ log });
+});
+
 // GET /api/v1/admin/rate-limit-violations — recent 429s, newest first.
 router.get('/rate-limit-violations', requireAuth, requireAdmin, async (_req: AuthedRequest, res: Response) => {
   const { data, error } = await supabase

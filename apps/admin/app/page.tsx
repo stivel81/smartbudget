@@ -9,6 +9,7 @@ export default function AdminPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [signedInEmail, setSignedInEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -22,6 +23,7 @@ export default function AdminPage() {
       // Confirm admin access before treating the login as successful —
       // a valid but non-admin login should not reach the dashboard.
       await getUsers(session.access_token);
+      setSignedInEmail(session.user.email);
       setAccessToken(session.access_token);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
@@ -67,5 +69,16 @@ export default function AdminPage() {
     );
   }
 
-  return <AdminDashboard accessToken={accessToken} />;
+  return (
+    <AdminDashboard
+      accessToken={accessToken}
+      userEmail={signedInEmail}
+      onSignOut={() => {
+        setAccessToken(null);
+        setSignedInEmail('');
+        setEmail('');
+        setPassword('');
+      }}
+    />
+  );
 }

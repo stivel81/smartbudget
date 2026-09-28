@@ -177,3 +177,19 @@ export interface AuditLogEntry {
 export function getAuditLog(accessToken: string): Promise<{ auditLog: AuditLogEntry[] }> {
   return request('/api/v1/admin/audit-log', accessToken);
 }
+
+export interface ScanLogEntry {
+  id: string;
+  userId: string;
+  email: string | null;
+  createdAt: string;
+  status: 'success' | 'failed';
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  error: string | null;
+}
+
+export function getScanLog(accessToken: string): Promise<{ log: ScanLogEntry[] }> {
+  return request('/api/v1/admin/scan-log', accessToken);
+}

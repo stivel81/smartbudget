@@ -1,57 +1,69 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import AdminLayout, { NavItemId } from './components/AdminLayout';
+import DashboardView from './views/DashboardView';
 import UsersView from './views/UsersView';
 import UserDetailView from './views/UserDetailView';
-import UsageView from './views/UsageView';
-import RateLimitViolationsView from './views/RateLimitViolationsView';
-import FailedScansView from './views/FailedScansView';
+import AIMonitorView from './views/AIMonitorView';
 import AuditLogView from './views/AuditLogView';
+import RateLimitViolationsView from './views/RateLimitViolationsView';
+import { getFailedScans } from '../lib/api';
 
 type View =
-  | { name: 'users' }
-  | { name: 'userDetail'; userId: string }
-  | { name: 'usage' }
-  | { name: 'rateLimits' }
-  | { name: 'failedScans' }
-  | { name: 'auditLog' };
+  | { name: Exclude<NavItemId, 'settings'> }
+  | { name: 'settings' }
+  | { name: 'userDetail'; userId: string };
 
-const NAV_ITEMS: { name: View['name']; label: string }[] = [
-  { name: 'users', label: 'Users' },
-  { name: 'usage', label: 'Usage' },
-  { name: 'rateLimits', label: 'Rate limits' },
-  { name: 'failedScans', label: 'Failed scans' },
-  { name: 'auditLog', label: 'Audit log' },
-];
+export default function AdminDashboard({
+  accessToken,
+  userEmail,
+  onSignOut,
+}: {
+  accessToken: string;
+  userEmail: string;
+  onSignOut: () => void;
+}) {
+  const [view, setView] = useState<View>({ name: 'dashboard' });
+  const [usersSearch, setUsersSearch] = useState('');
+  const [hasScanAlerts, setHasScanAlerts] = useState(false);
 
-export default function AdminDashboard({ accessToken }: { accessToken: string }) {
-  const [view, setView] = useState<View>({ name: 'users' });
+  useEffect(() => {
+    let cancelled = false;
+    getFailedScans(accessToken)
+      .then((res) => {
+        if (!cancelled) setHasScanAlerts(res.failures.length > 0);
+      })
+      .catch(() => {
+        // Non-critical — the bell just stays quiet if this check fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
+
+  const activeNavId: NavItemId = view.name === 'userDetail' ? 'users' : view.name;
 
   return (
-    <div style={{ maxWidth: 1000, margin: '40px auto', padding: 24 }}>
-      <h1 style={{ marginBottom: 16 }}>SmartBudget Admin</h1>
-
-      <nav style={{ display: 'flex', gap: 16, marginBottom: 24, borderBottom: '1px solid #e5e5e5', paddingBottom: 8 }}>
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.name}
-            onClick={() => setView({ name: item.name } as View)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: view.name === item.name || (item.name === 'users' && view.name === 'userDetail') ? 700 : 400,
-              padding: 0,
-              fontSize: 15,
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
+    <AdminLayout
+      active={activeNavId}
+      onNavigate={(id) => setView({ name: id } as View)}
+      onSearch={(query) => {
+        setUsersSearch(query);
+        setView({ name: 'users' });
+      }}
+      onSignOut={onSignOut}
+      userEmail={userEmail}
+      hasScanAlerts={hasScanAlerts}
+    >
+      {view.name === 'dashboard' && <DashboardView accessToken={accessToken} />}
 
       {view.name === 'users' && (
-        <UsersView accessToken={accessToken} onSelectUser={(userId) => setView({ name: 'userDetail', userId })} />
+        <UsersView
+          accessToken={accessToken}
+          initialSearch={usersSearch}
+          onSelectUser={(userId) => setView({ name: 'userDetail', userId })}
+        />
       )}
 
       {view.name === 'userDetail' && (
@@ -62,13 +74,18 @@ export default function AdminDashboard({ accessToken }: { accessToken: string })
         />
       )}
 
-      {view.name === 'usage' && <UsageView accessToken={accessToken} />}
+      {view.name === 'aiMonitor' && <AIMonitorView accessToken={accessToken} />}
+
+      {view.name === 'auditLog' && <AuditLogView accessToken={accessToken} />}
 
       {view.name === 'rateLimits' && <RateLimitViolationsView accessToken={accessToken} />}
 
-      {view.name === 'failedScans' && <FailedScansView accessToken={accessToken} />}
-
-      {view.name === 'auditLog' && <AuditLogView accessToken={accessToken} />}
-    </div>
+      {view.name === 'settings' && (
+        <div>
+          <h1 style={{ fontFamily: 'inherit', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Settings</h1>
+          <p style={{ fontSize: 13, color: '#6b7280' }}>Coming soon.</p>
+        </div>
+      )}
+    </AdminLayout>
   );
 }

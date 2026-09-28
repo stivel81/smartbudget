@@ -500,6 +500,80 @@ describe('GET /api/v1/admin/usage', () => {
   });
 });
 
+describe('GET /api/v1/admin/scan-log', () => {
+  it('merges successful and failed scans into one feed with emails, newest first', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({
+      data: [
+        {
+          id: 'r1',
+          user_id: 'user-123',
+          created_at: '2026-01-01T09:00:00Z',
+          claude_usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+        },
+      ],
+      error: null,
+    }); // receipts select
+    queueResult({
+      data: [
+        { id: 'f1', user_id: 'user-456', created_at: '2026-01-01T10:00:00Z', error_message: 'Claude timed out' },
+      ],
+      error: null,
+    }); // failures select
+    queueResult({
+      data: [
+        { id: 'user-123', email: 'a@b.com' },
+        { id: 'user-456', email: 'b@b.com' },
+      ],
+      error: null,
+    }); // profiles select
+
+    const response = await request(app)
+      .get('/api/v1/admin/scan-log')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.log).toHaveLength(2);
+    // failure is later (10:00) than the success (09:00), so it sorts first
+    expect(response.body.log[0]).toMatchObject({
+      status: 'failed',
+      email: 'b@b.com',
+      error: 'Claude timed out',
+      inputTokens: null,
+      costUsd: null,
+    });
+    expect(response.body.log[1]).toMatchObject({
+      status: 'success',
+      email: 'a@b.com',
+      inputTokens: 1000,
+      outputTokens: 200,
+    });
+    // (1000 * $1/1M) + (200 * $5/1M) = 0.001 + 0.001 = 0.002
+    expect(response.body.log[1].costUsd).toBeCloseTo(0.002, 6);
+  });
+
+  it('returns an empty feed without querying profiles when there is no scan activity', async () => {
+    queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
+    queueResult({ data: [], error: null }); // receipts select
+    queueResult({ data: [], error: null }); // failures select
+
+    const response = await request(app)
+      .get('/api/v1/admin/scan-log')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(response.body.log).toEqual([]);
+  });
+
+  it('returns 403 for a non-admin caller', async () => {
+    queueResult({ data: { is_admin: false }, error: null }); // requireAdmin check
+
+    const response = await request(app).get('/api/v1/admin/scan-log').set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(403);
+  });
+});
+
 describe('GET /api/v1/admin/rate-limit-violations', () => {
   it('returns recent violations for an admin caller', async () => {
     queueResult({ data: { is_admin: true }, error: null }); // requireAdmin check
