@@ -16,27 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getReceipts, getReceiptImageUrl, Receipt } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
-
-// Design tokens
-const COLORS = {
-  primary: '#1D9E75',
-  primaryDark: '#0F6E56',
-  background: '#f5f5f7',
-  card: '#ffffff',
-  border: '#e5e5e5',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666666',
-};
-
-// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
-const CATEGORY_META: Record<string, { icon: string; backgroundColor: string; color: string }> = {
-  Groceries: { icon: 'cart', backgroundColor: '#E1F5EE', color: '#0F6E56' },
-  Dining: { icon: 'silverware-fork-knife', backgroundColor: '#FEF3C7', color: '#D97706' },
-  Transport: { icon: 'bus', backgroundColor: '#EEF2FF', color: '#4F46E5' },
-  Entertainment: { icon: 'television', backgroundColor: '#FEE2E2', color: '#DC2626' },
-  Health: { icon: 'heart', backgroundColor: '#F0FDF4', color: '#16A34A' },
-  Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
-};
+import { COLORS, CATEGORY_META } from '../lib/theme';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -48,7 +28,7 @@ interface CategoryTotal {
 }
 
 const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
-  <View style={[styles.avatar, { backgroundColor: COLORS.primary }]}>
+  <View style={[styles.avatar, { backgroundColor: COLORS.button }]}>
     <Text style={styles.avatarText}>{initials}</Text>
   </View>
 );
@@ -71,7 +51,7 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number }> = ({
         <View
           style={[
             styles.progressBar,
-            { width: `${Math.min(share, 100)}%`, backgroundColor: COLORS.primary },
+            { width: `${Math.min(share, 100)}%`, backgroundColor: COLORS.success },
           ]}
         />
       </View>
@@ -149,7 +129,7 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
           </View>
 
           <View style={styles.modalImageContainer}>
-            {loading && <ActivityIndicator color={COLORS.primary} />}
+            {loading && <ActivityIndicator color={COLORS.button} />}
             {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
             {!loading && imageUrl ? (
               <Image source={{ uri: imageUrl }} style={styles.modalImage} resizeMode="contain" />
@@ -223,7 +203,7 @@ export default function DashboardScreen(): React.ReactElement {
 
         {/* Balance Card */}
         <LinearGradient
-          colors={[COLORS.primary, COLORS.primaryDark]}
+          colors={[COLORS.button, COLORS.button]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.balanceCard}
@@ -244,7 +224,7 @@ export default function DashboardScreen(): React.ReactElement {
 
         {loading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator color={COLORS.primary} />
+            <ActivityIndicator color={COLORS.button} />
           </View>
         )}
 
@@ -328,7 +308,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarText: {
-    color: '#ffffff',
+    color: COLORS.buttonText,
     fontWeight: '700',
     fontSize: 16,
   },
@@ -352,13 +332,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   balanceAmount: {
-    color: '#ffffff',
+    color: COLORS.buttonText,
     fontSize: 28,
     fontWeight: '700',
     marginTop: 4,
   },
   receiptCount: {
-    color: '#ffffff',
+    color: COLORS.buttonText,
     fontSize: 20,
     fontWeight: '700',
     marginTop: 4,
@@ -368,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    color: '#EF4444',
+    color: COLORS.danger,
     fontSize: 14,
     textAlign: 'center',
   },

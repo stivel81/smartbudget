@@ -17,6 +17,7 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
 import { AuthContext } from '../App';
 import { textDirectionStyle } from '../lib/rtl';
+import { COLORS } from '../lib/theme';
 
 // Claude resizes any image above this (long edge) before billing/processing
 // it, so uploading larger buys nothing — this is also the size we store.
@@ -44,18 +45,6 @@ async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<str
   }
   return result.base64;
 }
-
-const COLORS = {
-  primary: '#1D9E75',
-  primaryDark: '#0F6E56',
-  alert: '#EF4444',
-  warning: '#F59E0B',
-  background: '#f5f5f7',
-  card: '#ffffff',
-  border: '#e5e5e5',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666666',
-};
 
 const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 const CAMERA_HEIGHT = screenHeight * 0.65;
@@ -113,7 +102,7 @@ const CornerGuide: React.FC<CornerGuideProps> = ({ position }) => {
       style={[
         componentStyles.cornerGuide,
         styles[position],
-        { borderColor: '#22c55e' },
+        { borderColor: COLORS.scanLineGreen },
       ]}
     />
   );
@@ -341,7 +330,7 @@ export default function ScanScreen(): React.ReactElement {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#ffffff" />
+            <ActivityIndicator color={COLORS.buttonText} />
           ) : (
             <View style={componentStyles.captureButtonInner} />
           )}
@@ -435,7 +424,7 @@ export default function ScanScreen(): React.ReactElement {
                 disabled={confirming || discarding}
               >
                 {confirming ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={COLORS.buttonText} />
                 ) : (
                   <Text style={componentStyles.confirmButtonText}>Confirm</Text>
                 )}
@@ -451,11 +440,11 @@ export default function ScanScreen(): React.ReactElement {
 const componentStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: COLORS.darkBg,
   },
   cameraViewfinder: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: COLORS.darkBg,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -470,9 +459,9 @@ const componentStyles = StyleSheet.create({
     position: 'absolute',
     width: screenWidth - 40,
     height: 2,
-    backgroundColor: '#22c55e',
+    backgroundColor: COLORS.scanLineGreen,
     left: 20,
-    shadowColor: '#22c55e',
+    shadowColor: COLORS.scanLineGreen,
     shadowOpacity: 0.8,
     shadowRadius: 10,
     elevation: 5,
@@ -483,7 +472,7 @@ const componentStyles = StyleSheet.create({
     alignSelf: 'center',
   },
   instructionText: {
-    color: '#ffffff',
+    color: COLORS.surface,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -493,13 +482,13 @@ const componentStyles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 16,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: COLORS.darkBg,
   },
   controlButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -507,7 +496,7 @@ const componentStyles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
@@ -517,14 +506,14 @@ const componentStyles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#ffffff',
+    backgroundColor: COLORS.surface,
   },
   resultCard: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
@@ -556,7 +545,7 @@ const componentStyles = StyleSheet.create({
   resultTotal: {
     borderBottomWidth: 0,
     paddingVertical: 12,
-    backgroundColor: '#f0fdf4',
+    backgroundColor: COLORS.successBg,
     paddingHorizontal: 12,
     borderRadius: 8,
     marginVertical: 4,
@@ -583,12 +572,12 @@ const componentStyles = StyleSheet.create({
   },
   resultTotalValue: {
     fontSize: 18,
-    color: COLORS.primary,
+    color: COLORS.success,
     fontWeight: '700',
   },
   resultTotalInput: {
     fontSize: 18,
-    color: COLORS.primary,
+    color: COLORS.success,
     fontWeight: '700',
     textAlign: 'right',
     flex: 1,
@@ -620,13 +609,13 @@ const componentStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
   },
   confirmButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#ffffff',
+    color: COLORS.surface,
   },
 });

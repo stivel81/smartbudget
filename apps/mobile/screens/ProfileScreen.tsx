@@ -10,16 +10,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AuthContext } from '../App';
-
-const COLORS = {
-  primary: '#1D9E75',
-  primaryDark: '#0F6E56',
-  background: '#f5f5f7',
-  card: '#ffffff',
-  border: '#e5e5e5',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666666',
-};
+import { COLORS } from '../lib/theme';
 
 export default function ProfileScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
@@ -53,7 +44,7 @@ export default function ProfileScreen(): React.ReactElement {
           <View
             style={[
               styles.largeAvatar,
-              { backgroundColor: COLORS.primary },
+              { backgroundColor: COLORS.button },
             ]}
           >
             <Text style={styles.largeAvatarText}>{initials}</Text>
@@ -128,7 +119,7 @@ export default function ProfileScreen(): React.ReactElement {
           testID="profile-sign-out-button"
         >
           {signingOut ? (
-            <ActivityIndicator color="#dc2626" />
+            <ActivityIndicator color={COLORS.danger} />
           ) : (
             <Text style={styles.signOutButtonText}>Sign Out</Text>
           )}
@@ -175,7 +166,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   largeAvatarText: {
-    color: '#ffffff',
+    color: COLORS.buttonText,
     fontWeight: '700',
     fontSize: 24,
   },
@@ -210,15 +201,15 @@ const styles = StyleSheet.create({
   signOutButton: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#fee2e2',
+    backgroundColor: COLORS.signOutBg,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#fca5a5',
+    borderColor: COLORS.signOutBorder,
     alignItems: 'center',
   },
   signOutButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#dc2626',
+    color: COLORS.danger,
   },
 });

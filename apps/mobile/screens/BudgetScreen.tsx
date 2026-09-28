@@ -15,28 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
-
-const COLORS = {
-  primary: '#1D9E75',
-  primaryDark: '#0F6E56',
-  alert: '#EF4444',
-  warning: '#F59E0B',
-  background: '#f5f5f7',
-  card: '#ffffff',
-  border: '#e5e5e5',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666666',
-};
-
-// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
-const CATEGORY_META: Record<string, { icon: string; backgroundColor: string; color: string }> = {
-  Groceries: { icon: 'cart', backgroundColor: '#E1F5EE', color: '#0F6E56' },
-  Dining: { icon: 'silverware-fork-knife', backgroundColor: '#FEF3C7', color: '#D97706' },
-  Transport: { icon: 'bus', backgroundColor: '#EEF2FF', color: '#4F46E5' },
-  Entertainment: { icon: 'television', backgroundColor: '#FEE2E2', color: '#DC2626' },
-  Health: { icon: 'heart', backgroundColor: '#F0FDF4', color: '#16A34A' },
-  Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
-};
+import { COLORS, CATEGORY_META } from '../lib/theme';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -53,7 +32,7 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[] }> = ({ overBudget }
 
   return (
     <View style={styles.alertBanner}>
-      <MaterialCommunityIcons name="alert-circle" size={20} color="#92400e" />
+      <MaterialCommunityIcons name="alert-circle" size={20} color={COLORS.warning} />
       <Text style={styles.alertText}>
         {names} {overBudget.length === 1 ? 'is' : 'are'} at 90%+ of budget
       </Text>
@@ -65,9 +44,9 @@ const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ 
   const meta = categoryMeta(item.category);
   const percentage = (item.spent / item.monthly_limit) * 100;
 
-  let barColor = '#16A34A'; // green, under 70%
-  if (percentage >= 90) barColor = '#EF4444'; // red
-  else if (percentage >= 70) barColor = '#F59E0B'; // amber
+  let barColor = COLORS.success; // green, under 70%
+  if (percentage >= 90) barColor = COLORS.danger; // red
+  else if (percentage >= 70) barColor = COLORS.warning; // amber
 
   return (
     <TouchableOpacity style={styles.budgetItem} onPress={onPress}>
@@ -87,7 +66,7 @@ const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ 
           <Text
             style={[
               styles.budgetItemPercentageText,
-              { color: percentage > 100 ? COLORS.alert : COLORS.textPrimary },
+              { color: percentage > 100 ? COLORS.danger : COLORS.textPrimary },
             ]}
           >
             {Math.min(Math.round(percentage), 999)}%
@@ -212,13 +191,13 @@ export default function BudgetScreen(): React.ReactElement {
             <Text style={styles.title}>Budget</Text>
           </View>
           <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-            <MaterialCommunityIcons name="plus" size={24} color={COLORS.primary} />
+            <MaterialCommunityIcons name="plus" size={24} color={COLORS.button} />
           </TouchableOpacity>
         </View>
 
         {loading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator color={COLORS.primary} />
+            <ActivityIndicator color={COLORS.button} />
           </View>
         )}
 
@@ -262,7 +241,7 @@ export default function BudgetScreen(): React.ReactElement {
               <View style={styles.summaryDivider} />
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Remaining</Text>
-                <Text style={[styles.summaryValue, { color: COLORS.primary }]}>
+                <Text style={[styles.summaryValue, { color: COLORS.success }]}>
                   ₪{(totalBudget - totalSpent).toFixed(0)}
                 </Text>
               </View>
@@ -316,7 +295,7 @@ export default function BudgetScreen(): React.ReactElement {
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalSaveButton} onPress={saveBudget} disabled={saving}>
                 {saving ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={COLORS.buttonText} />
                 ) : (
                   <Text style={styles.modalSaveButtonText}>Save</Text>
                 )}
@@ -371,7 +350,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    color: COLORS.alert,
+    color: COLORS.danger,
     fontSize: 14,
     textAlign: 'center',
     paddingHorizontal: 16,
@@ -400,17 +379,17 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#fef3c7',
+    backgroundColor: COLORS.alertBg,
     borderRadius: 10,
     borderLeftWidth: 4,
-    borderLeftColor: COLORS.warning,
+    borderLeftColor: COLORS.alertBorder,
     gap: 10,
   },
   alertText: {
     flex: 1,
     fontSize: 14,
     fontWeight: '500',
-    color: '#92400e',
+    color: COLORS.alertTextColor,
   },
   section: {
     paddingHorizontal: 16,
@@ -535,11 +514,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: '#fafafa',
+    backgroundColor: COLORS.chipBg,
   },
   categoryChipSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: COLORS.button,
+    borderColor: COLORS.button,
   },
   categoryChipText: {
     fontSize: 13,
@@ -547,7 +526,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   categoryChipTextSelected: {
-    color: '#ffffff',
+    color: COLORS.buttonText,
   },
   modalInput: {
     height: 44,
@@ -555,7 +534,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     borderRadius: 10,
     paddingHorizontal: 16,
-    backgroundColor: '#fafafa',
+    backgroundColor: COLORS.chipBg,
     color: COLORS.textPrimary,
     fontSize: 16,
   },
@@ -582,13 +561,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     borderRadius: 12,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalSaveButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#ffffff',
+    color: COLORS.buttonText,
   },
 });
