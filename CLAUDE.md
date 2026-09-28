@@ -58,8 +58,14 @@ cd apps/mobile && npx expo start              # Terminal 2
 
 Supabase Studio (visual DB admin): https://supabase.com/dashboard/project/nuhfxmjytgeyarpkhsav
 
-Repo isn't linked to the hosted project yet — run `supabase link --project-ref nuhfxmjytgeyarpkhsav`
-before using `supabase db push` / `db pull` / `migration up`.
+Repo is linked to the hosted project (`supabase/config.toml`; link state in the gitignored
+`supabase/.temp/`). On a fresh clone run `supabase login` then
+`supabase link --project-ref nuhfxmjytgeyarpkhsav`. Always `supabase db push --dry-run --linked`
+before a real push. After any RLS/grant change run `npm run verify:rls` in apps/backend
+(it attacks the live DB via the anon key and must pass).
+
+Free-tier projects auto-pause when idle: if the project hostname stops resolving, restore it
+from the dashboard (takes a few minutes to come fully back).
 
 ## Key Conventions
 - All code in TypeScript — no plain .js files
