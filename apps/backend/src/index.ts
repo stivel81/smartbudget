@@ -37,6 +37,24 @@ export const authLimiter = rateLimit({
   handler: rateLimitHandler,
 });
 
+// Password reset is a stricter, per-route budget on top of authLimiter:
+// forgot-password sends email (spam/cost vector) and reset-password
+// guesses a 6-digit code (brute-force vector). Separate instances so
+// requesting codes can't exhaust the budget for redeeming one, and so
+// neither eats into /login. Every request counts, including 400s.
+export const PASSWORD_RESET_LIMIT = 5;
+const passwordResetLimiter = () =>
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: PASSWORD_RESET_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipRateLimit,
+    handler: rateLimitHandler,
+  });
+export const forgotPasswordLimiter = passwordResetLimiter();
+export const resetPasswordLimiter = passwordResetLimiter();
+
 // Scan calls Claude (real cost per request) — cap per-IP request rate.
 export const scanLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -88,7 +106,9 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', version: '1.0.0' });
 });
 
-// Auth routes
+// Auth routes (password reset gets its own tighter limit first)
+app.use('/api/v1/auth/forgot-password', forgotPasswordLimiter);
+app.use('/api/v1/auth/reset-password', resetPasswordLimiter);
 app.use('/api/v1/auth', authLimiter, authRouter);
 
 // Receipt routes (scan hits the Claude API, so it gets its own tighter limit)

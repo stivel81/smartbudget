@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
+import { supabaseAuth, createIsolatedAuthClient } from '@smartbudget/shared/lib/supabaseAuth';
 
 const router = Router();
 
@@ -9,9 +9,23 @@ const isValidEmail = (email: string): boolean => {
   return emailRegex.test(email);
 };
 
-const isValidPassword = (password: string): boolean => {
-  return password.length >= 8;
+const MIN_PASSWORD_LENGTH = 8;
+
+// Single source of truth for password rules — used by both /signup and
+// /reset-password so the two can never drift apart. Returns the
+// user-facing error message, or null when the password is acceptable.
+export const passwordRuleError = (password: string): string | null => {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters long`;
+  }
+  return null;
 };
+
+const isValidResetCode = (code: string): boolean => /^\d{6}$/.test(code);
+
+const FORGOT_PASSWORD_MESSAGE =
+  'If an account exists for that email, a 6-digit reset code has been sent.';
+const INVALID_CODE_MESSAGE = 'Invalid or expired code';
 
 interface SignupRequest {
   email?: string;
@@ -22,6 +36,16 @@ interface SignupRequest {
 interface LoginRequest {
   email?: string;
   password?: string;
+}
+
+interface ForgotPasswordRequest {
+  email?: unknown;
+}
+
+interface ResetPasswordRequest {
+  email?: unknown;
+  code?: unknown;
+  newPassword?: unknown;
 }
 
 interface RefreshRequest {
@@ -47,9 +71,10 @@ router.post('/signup', async (req: Request, res: Response) => {
     });
   }
 
-  if (!isValidPassword(password)) {
+  const passwordError = passwordRuleError(password);
+  if (passwordError) {
     return res.status(400).json({
-      error: 'Password must be at least 8 characters long',
+      error: passwordError,
       status: 400,
     });
   }
@@ -221,6 +246,146 @@ router.post('/refresh', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('Refresh error:', err);
+    return res.status(500).json({
+      error: 'Internal server error',
+      status: 500,
+    });
+  }
+});
+
+// POST /api/v1/auth/forgot-password — email the user a 6-digit recovery
+// code (the "Reset Password" email template must render {{ .Token }}, see
+// docs/PASSWORD_RESET_SETUP.md). No deep links: the code is typed into the
+// app and redeemed via /reset-password.
+//
+// Anti-enumeration: every well-formed request gets the same 200 + generic
+// message whether or not the account exists, and whatever Supabase says
+// (unknown user, its own email rate limit, outage). Failures are logged
+// server-side only. Rate limited per IP in index.ts.
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body as ForgotPasswordRequest;
+
+  if (typeof email !== 'string' || !email.trim()) {
+    return res.status(400).json({
+      error: 'Missing required field: email',
+      status: 400,
+    });
+  }
+
+  const normalizedEmail = email.trim();
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({
+      error: 'Invalid email format',
+      status: 400,
+    });
+  }
+
+  try {
+    const { error } = await supabaseAuth.auth.resetPasswordForEmail(normalizedEmail);
+    if (error) {
+      console.error('Forgot password: Supabase error (hidden from client):', error);
+    }
+  } catch (err) {
+    console.error('Forgot password: unexpected error (hidden from client):', err);
+  }
+
+  return res.status(200).json({ message: FORGOT_PASSWORD_MESSAGE });
+});
+
+// POST /api/v1/auth/reset-password — redeem the emailed 6-digit code and set
+// a new password, then return a session (same shape as /login) so the app
+// can sign straight in.
+//
+// verifyOtp() stores the recovery session *on the client instance* and
+// updateUser() acts on whatever session that instance holds. Both run on a
+// fresh per-request client (createIsolatedAuthClient) — never the shared
+// supabaseAuth — so concurrent resets can't see each other's session (the
+// same class of bug fixed in 9062cae for getUser/signInWithPassword).
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { email, code, newPassword } = req.body as ResetPasswordRequest;
+
+  if (
+    typeof email !== 'string' || !email.trim() ||
+    typeof code !== 'string' || !code.trim() ||
+    typeof newPassword !== 'string' || !newPassword
+  ) {
+    return res.status(400).json({
+      error: 'Missing required fields: email, code, newPassword',
+      status: 400,
+    });
+  }
+
+  const normalizedEmail = email.trim();
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({
+      error: 'Invalid email format',
+      status: 400,
+    });
+  }
+
+  const normalizedCode = code.trim();
+  if (!isValidResetCode(normalizedCode)) {
+    return res.status(400).json({
+      error: 'Code must be 6 digits',
+      status: 400,
+    });
+  }
+
+  const passwordError = passwordRuleError(newPassword);
+  if (passwordError) {
+    return res.status(400).json({
+      error: passwordError,
+      status: 400,
+    });
+  }
+
+  try {
+    const client = createIsolatedAuthClient();
+
+    const { data: otpData, error: otpError } = await client.auth.verifyOtp({
+      email: normalizedEmail,
+      token: normalizedCode,
+      type: 'recovery',
+    });
+
+    if (otpError || !otpData.session || !otpData.user) {
+      if (otpError) console.warn('Reset password: OTP verification failed:', otpError.message);
+      return res.status(400).json({
+        error: INVALID_CODE_MESSAGE,
+        status: 400,
+      });
+    }
+
+    const { error: updateError } = await client.auth.updateUser({ password: newPassword });
+
+    if (updateError) {
+      const code = (updateError as { code?: string }).code;
+      // User-correctable rejections from Supabase's own password policy.
+      if (code === 'same_password' || code === 'weak_password') {
+        return res.status(400).json({
+          error: updateError.message,
+          status: 400,
+        });
+      }
+      console.error('Reset password: updateUser failed:', updateError);
+      return res.status(500).json({
+        error: 'Failed to update password',
+        status: 500,
+      });
+    }
+
+    return res.status(200).json({
+      session: {
+        access_token: otpData.session.access_token,
+        refresh_token: otpData.session.refresh_token,
+        user: {
+          id: otpData.user.id,
+          email: otpData.user.email,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Reset password error:', err);
     return res.status(500).json({
       error: 'Internal server error',
       status: 500,

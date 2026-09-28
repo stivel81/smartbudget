@@ -17,7 +17,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
 // on `receipts`, which only has SELECT/INSERT policies). A separate client
 // instance keeps that mutation isolated from the client used for DB/storage
 // access.
-export const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, {
+const clientOptions = {
   auth: {
     autoRefreshToken: false,
     persistSession: false,
@@ -26,4 +26,17 @@ export const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, {
     // Node 20 has no native WebSocket global (added in Node 22); supply `ws` explicitly.
     transport: WebSocket as any,
   },
-});
+};
+
+export const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, clientOptions);
+
+// A brand-new, throwaway client for flows that must *hold* a user session
+// between calls — e.g. password reset: verifyOtp() stores the recovery
+// session on the client, then updateUser() acts on it. Doing that on the
+// shared `supabaseAuth` instance would let two concurrent requests
+// overwrite each other's session (request B's verifyOtp landing between
+// request A's verifyOtp and updateUser would change B's password to A's).
+// Create one per request and let it be garbage-collected afterwards.
+export function createIsolatedAuthClient() {
+  return createClient(supabaseUrl!, supabaseServiceKey!, clientOptions);
+}

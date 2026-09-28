@@ -92,6 +92,23 @@ export const mockSignUp = jest.fn();
 export const mockSignInWithPassword = jest.fn();
 export const mockRefreshSession = jest.fn();
 export const mockAdminSignOut = jest.fn();
+export const mockResetPasswordForEmail = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
+
+// Password reset runs verifyOtp + updateUser on a fresh per-request client
+// (createIsolatedAuthClient). Each call here returns a *new* object whose
+// methods delegate to these shared mocks, and records it in
+// isolatedClients so tests can assert one client per request and that
+// updateUser ran on the same instance as verifyOtp.
+export const mockVerifyOtp = jest.fn();
+export const mockUpdateUser = jest.fn();
+export const isolatedClients: any[] = [];
+export const createIsolatedAuthClient = jest.fn(() => {
+  const client: any = { auth: {} };
+  client.auth.verifyOtp = jest.fn((...args: unknown[]) => mockVerifyOtp(...args));
+  client.auth.updateUser = jest.fn((...args: unknown[]) => mockUpdateUser(...args));
+  isolatedClients.push(client);
+  return client;
+});
 
 export const supabaseAuth = {
   auth: {
@@ -99,6 +116,7 @@ export const supabaseAuth = {
     signUp: mockSignUp,
     signInWithPassword: mockSignInWithPassword,
     refreshSession: mockRefreshSession,
+    resetPasswordForEmail: mockResetPasswordForEmail,
     admin: { signOut: mockAdminSignOut },
   },
 };
