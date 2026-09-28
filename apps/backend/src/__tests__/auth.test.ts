@@ -24,7 +24,9 @@ import {
   mockIsolatedAdminSignOut,
   mockUpdateUserById,
   mockGetUser,
+  mockResend,
 } from '../testUtils/supabaseMock';
+import { displayNameOf, sessionPayload } from '../routes/auth';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -137,6 +139,63 @@ describe('POST /api/v1/auth/login', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error).toMatch(/verify your email/i);
+    expect(response.body.error).toMatch(/6-digit code/);
+    expect(response.body.code).toBe('email_not_confirmed');
+  });
+
+  it('recognises an unconfirmed email by Supabase error code alone', async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: 'Something else', status: 400, code: 'email_not_confirmed' },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'a@b.com', password: 'password123' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({
+      error: 'Please verify your email before signing in — enter the 6-digit code we emailed you.',
+      status: 401,
+      code: 'email_not_confirmed',
+    });
+  });
+
+  it('never adds the email_not_confirmed code to a wrong-password or unknown-account error', async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      data: { session: null, user: null },
+      error: { message: 'Invalid login credentials', status: 400, code: 'invalid_credentials' },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'nobody@example.com', password: 'password123' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'Invalid email or password', status: 401 });
+  });
+
+  it("returns the user's display name from user_metadata in the session", async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      data: {
+        session: { access_token: 'tok', refresh_token: 'ref' },
+        user: { id: 'user-1', email: 'a@b.com', user_metadata: { name: '  Adrian Schtivelmager ' } },
+      },
+      error: null,
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'a@b.com', password: 'password123' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      session: {
+        access_token: 'tok',
+        refresh_token: 'ref',
+        user: { id: 'user-1', email: 'a@b.com', name: 'Adrian Schtivelmager' },
+      },
+    });
   });
 
   it('returns 403 with a clear message when the account is suspended', async () => {
@@ -192,7 +251,7 @@ describe('POST /api/v1/auth/refresh', () => {
     expect(response.body.session).toEqual({
       access_token: 'new-tok',
       refresh_token: 'new-ref',
-      user: { id: 'user-1', email: 'a@b.com' },
+      user: { id: 'user-1', email: 'a@b.com', name: null },
     });
     expect(mockRefreshSession).toHaveBeenCalledWith({ refresh_token: 'old-ref' });
   });
@@ -386,7 +445,7 @@ describe('POST /api/v1/auth/reset-password', () => {
       session: {
         access_token: 'recovery-access',
         refresh_token: 'recovery-refresh',
-        user: { id: 'user-1', email: 'a@b.com' },
+        user: { id: 'user-1', email: 'a@b.com', name: null },
       },
     });
     expect(mockVerifyOtp).toHaveBeenCalledWith({ email: 'a@b.com', token: '123456', type: 'recovery' });
@@ -814,5 +873,315 @@ describe('POST /api/v1/auth/change-password', () => {
     expect(response.status).toBe(401);
     expect(mockIsolatedSignIn).not.toHaveBeenCalled();
     expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('displayNameOf / sessionPayload', () => {
+  it.each([
+    [{ name: 'Adrian Schtivelmager' }, 'Adrian Schtivelmager'],
+    [{ name: '  Ada  ' }, 'Ada'],
+    [{ name: 'אדריאן' }, 'אדריאן'],
+    [{ name: '' }, null],
+    [{ name: '   ' }, null],
+    [{ name: 42 }, null],
+    [{ name: null }, null],
+    [{}, null],
+    [null, null],
+    [undefined, null],
+  ])('user_metadata %p -> %p', (meta, expected) => {
+    expect(displayNameOf({ id: 'u', email: 'a@b.com', user_metadata: meta as any })).toBe(expected);
+  });
+
+  it('builds the login session shape and never includes other user fields', () => {
+    const payload = sessionPayload(
+      { access_token: 'a', refresh_token: 'r', expires_in: 3600 } as any,
+      { id: 'u1', email: 'a@b.com', user_metadata: { name: 'Ada' }, app_metadata: { is_admin: true } } as any
+    );
+    expect(payload).toEqual({
+      session: { access_token: 'a', refresh_token: 'r', user: { id: 'u1', email: 'a@b.com', name: 'Ada' } },
+    });
+  });
+});
+
+describe('POST /api/v1/auth/refresh — display name', () => {
+  it('includes the display name so a restored session knows it', async () => {
+    mockRefreshSession.mockResolvedValue({
+      data: {
+        session: { access_token: 'new-tok', refresh_token: 'new-ref' },
+        user: { id: 'user-1', email: 'a@b.com', user_metadata: { name: 'Adrian Schtivelmager' } },
+      },
+      error: null,
+    });
+
+    const response = await request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'old-ref' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.session.user).toEqual({ id: 'user-1', email: 'a@b.com', name: 'Adrian Schtivelmager' });
+  });
+});
+
+describe('POST /api/v1/auth/verify-signup', () => {
+  const validBody = { email: 'new@example.com', code: '123456' };
+  const confirmedSession = { access_token: 'signup-access', refresh_token: 'signup-refresh' };
+  const confirmedUser = { id: 'user-9', email: 'new@example.com', user_metadata: { name: 'Adrian Schtivelmager' } };
+  let errorSpy: jest.SpyInstance;
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    isolatedClients.length = 0;
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  function mockVerifySuccess() {
+    mockVerifyOtp.mockResolvedValueOnce({ data: { session: confirmedSession, user: confirmedUser }, error: null });
+  }
+
+  it("verifies the code as type 'signup' and returns a session in the exact /login shape", async () => {
+    mockVerifySuccess();
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      session: {
+        access_token: 'signup-access',
+        refresh_token: 'signup-refresh',
+        user: { id: 'user-9', email: 'new@example.com', name: 'Adrian Schtivelmager' },
+      },
+    });
+    expect(mockVerifyOtp).toHaveBeenCalledTimes(1);
+    expect(mockVerifyOtp).toHaveBeenCalledWith({ email: 'new@example.com', token: '123456', type: 'signup' });
+  });
+
+  it('returns the same keys as /login for the same user', async () => {
+    mockVerifySuccess();
+    const verify = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    mockSignInWithPassword.mockResolvedValueOnce({ data: { session: confirmedSession, user: confirmedUser }, error: null });
+    const login = await request(app).post('/api/v1/auth/login').send({ email: 'new@example.com', password: 'password123' });
+
+    expect(verify.body).toEqual(login.body);
+  });
+
+  it('returns name: null when the account has no display name', async () => {
+    mockVerifyOtp.mockResolvedValueOnce({
+      data: { session: confirmedSession, user: { id: 'user-9', email: 'new@example.com' } },
+      error: null,
+    });
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(200);
+    expect(response.body.session.user).toEqual({ id: 'user-9', email: 'new@example.com', name: null });
+  });
+
+  it('runs verifyOtp on one fresh isolated client per request, never the shared one', async () => {
+    mockVerifySuccess();
+    mockVerifySuccess();
+
+    await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+    await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(createIsolatedAuthClient).toHaveBeenCalledTimes(2);
+    expect(isolatedClients).toHaveLength(2);
+    expect(isolatedClients[0]).not.toBe(isolatedClients[1]);
+    for (const client of isolatedClients) {
+      expect(client.auth.verifyOtp).toHaveBeenCalledTimes(1);
+    }
+    expect(mockSignInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it('trims the email and code', async () => {
+    mockVerifySuccess();
+
+    const response = await request(app)
+      .post('/api/v1/auth/verify-signup')
+      .send({ email: ' new@example.com ', code: ' 123456 ' });
+
+    expect(response.status).toBe(200);
+    expect(mockVerifyOtp).toHaveBeenCalledWith({ email: 'new@example.com', token: '123456', type: 'signup' });
+  });
+
+  it.each([
+    ['otp_expired', 'Token has expired or is invalid'],
+    ['user_not_found', 'User not found'],
+    ['over_request_rate_limit', 'Request rate limit reached'],
+  ])('collapses Supabase %s into the generic 400 "Invalid or expired code"', async (code, message) => {
+    mockVerifyOtp.mockResolvedValueOnce({ data: { session: null, user: null }, error: { message, status: 403, code } });
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid or expired code', status: 400 });
+    expect(JSON.stringify(response.body)).not.toContain(message);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Verify signup'), message);
+  });
+
+  it('returns the generic 400 when verifyOtp yields no session', async () => {
+    mockVerifyOtp.mockResolvedValueOnce({ data: { session: null, user: confirmedUser }, error: null });
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid or expired code', status: 400 });
+    expect(response.body.session).toBeUndefined();
+  });
+
+  it('returns the generic 400 when verifyOtp yields no user', async () => {
+    mockVerifyOtp.mockResolvedValueOnce({ data: { session: confirmedSession, user: null }, error: null });
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body.session).toBeUndefined();
+  });
+
+  it('returns 500 when verifyOtp throws', async () => {
+    const thrown = new Error('network down');
+    mockVerifyOtp.mockRejectedValueOnce(thrown);
+
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Internal server error', status: 500 });
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(String), thrown);
+  });
+
+  it.each([
+    ['email missing', { code: '123456' }],
+    ['code missing', { email: 'new@example.com' }],
+    ['both missing', {}],
+    ['blank email', { email: '   ', code: '123456' }],
+    ['blank code', { email: 'new@example.com', code: '  ' }],
+    ['non-string code', { email: 'new@example.com', code: 123456 }],
+    ['non-string email', { email: ['new@example.com'], code: '123456' }],
+  ])('returns 400 when %s', async (_label, body) => {
+    const response = await request(app).post('/api/v1/auth/verify-signup').send(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Missing required fields: email, code', status: 400 });
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+    expect(mockVerifyOtp).not.toHaveBeenCalled();
+  });
+
+  it.each(['not-an-email', 'a@b', '@b.com', 'a b@c.com'])('returns 400 for the malformed email %p', async (email) => {
+    const response = await request(app).post('/api/v1/auth/verify-signup').send({ email, code: '123456' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid email format', status: 400 });
+    expect(mockVerifyOtp).not.toHaveBeenCalled();
+  });
+
+  it.each(['12345', '1234567', '12a456', 'abcdef', '12 456', '１２３４５６'])(
+    'returns 400 for the malformed code %p without calling Supabase',
+    async (code) => {
+      const response = await request(app).post('/api/v1/auth/verify-signup').send({ email: 'new@example.com', code });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'Code must be 6 digits', status: 400 });
+      expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+      expect(mockVerifyOtp).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe('POST /api/v1/auth/resend-signup', () => {
+  const RESEND_OK = 'If that email is waiting to be verified, a new 6-digit code has been sent.';
+  let errorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("asks Supabase to resend the 'signup' email and returns the generic 200", async () => {
+    mockResend.mockResolvedValueOnce({ data: {}, error: null });
+
+    const response = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'new@example.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: RESEND_OK });
+    expect(mockResend).toHaveBeenCalledTimes(1);
+    expect(mockResend).toHaveBeenCalledWith({ type: 'signup', email: 'new@example.com' });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('trims the email', async () => {
+    await request(app).post('/api/v1/auth/resend-signup').send({ email: '  new@example.com ' });
+
+    expect(mockResend).toHaveBeenCalledWith({ type: 'signup', email: 'new@example.com' });
+  });
+
+  it.each([
+    ['user not found', { message: 'User not found', status: 404, code: 'user_not_found' }],
+    ['already confirmed', { message: 'Email already confirmed', status: 400, code: 'email_address_invalid' }],
+    ['Supabase email rate limit', { message: 'For security purposes, you can only request this after 42 seconds.', status: 429, code: 'over_email_send_rate_limit' }],
+  ])('still returns the identical generic 200 when Supabase reports %s, and logs it', async (_label, supaError) => {
+    mockResend.mockResolvedValueOnce({ data: null, error: supaError });
+
+    const response = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'x@example.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: RESEND_OK });
+    expect(JSON.stringify(response.body)).not.toContain(supaError.message);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Resend signup'), supaError);
+  });
+
+  it('still returns the generic 200 when the Supabase call throws, and logs it', async () => {
+    const thrown = new Error('ECONNRESET');
+    mockResend.mockRejectedValueOnce(thrown);
+
+    const response = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'x@example.com' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: RESEND_OK });
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(String), thrown);
+  });
+
+  it('answers a known and an unknown email identically', async () => {
+    mockResend.mockResolvedValueOnce({ data: {}, error: null });
+    const known = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'pending@example.com' });
+    mockResend.mockResolvedValueOnce({ data: null, error: { message: 'User not found', status: 404 } });
+    const unknown = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'nobody@example.com' });
+
+    expect(unknown.status).toBe(known.status);
+    expect(unknown.body).toEqual(known.body);
+  });
+
+  it('never uses an isolated client (it holds no session)', async () => {
+    await request(app).post('/api/v1/auth/resend-signup').send({ email: 'new@example.com' });
+
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing', {}],
+    ['empty', { email: '' }],
+    ['whitespace-only', { email: '   ' }],
+    ['non-string', { email: 12345 }],
+  ])('returns 400 when the email is %s', async (_label, body) => {
+    const response = await request(app).post('/api/v1/auth/resend-signup').send(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Missing required field: email', status: 400 });
+    expect(mockResend).not.toHaveBeenCalled();
+  });
+
+  it.each(['not-an-email', 'a@b', '@b.com'])('returns 400 for the malformed email %p', async (email) => {
+    const response = await request(app).post('/api/v1/auth/resend-signup').send({ email });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Invalid email format', status: 400 });
+    expect(mockResend).not.toHaveBeenCalled();
   });
 });

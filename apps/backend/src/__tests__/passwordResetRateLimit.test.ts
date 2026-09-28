@@ -143,4 +143,54 @@ describe('Password reset rate limiting', () => {
       .send({ email: 'a@b.com', code: 'nope', newPassword: 'newpassword123' });
     expect(reset.status).toBe(400);
   });
+
+  it('returns 429 on verify-signup after 5 attempts (400s count too) and never reaches Supabase', async () => {
+    const { app, mock, limit } = freshApp();
+
+    for (let i = 0; i < limit; i++) {
+      const res = await request(app).post('/api/v1/auth/verify-signup').send({ email: 'a@b.com', code: 'nope' });
+      expect(res.status).toBe(400);
+    }
+
+    mock.queueResult({ error: null });
+    const limited = await request(app).post('/api/v1/auth/verify-signup').send({ email: 'a@b.com', code: '123456' });
+
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: 'Too many requests, please try again later.', status: 429 });
+    expect(mock.mockVerifyOtp).not.toHaveBeenCalled();
+    expect(mock.supabase.from).toHaveBeenCalledWith('rate_limit_violations');
+  });
+
+  it('returns 429 on resend-signup after 5 attempts and sends no extra email', async () => {
+    const { app, mock, limit } = freshApp();
+
+    for (let i = 0; i < limit; i++) {
+      const res = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'a@b.com' });
+      expect(res.status).toBe(200);
+    }
+    expect(mock.mockResend).toHaveBeenCalledTimes(limit);
+
+    mock.queueResult({ error: null });
+    const limited = await request(app).post('/api/v1/auth/resend-signup').send({ email: 'a@b.com' });
+
+    expect(limited.status).toBe(429);
+    expect(mock.mockResend).toHaveBeenCalledTimes(limit);
+  });
+
+  it('keeps verify-signup and resend-signup on separate budgets from each other and from password reset', async () => {
+    const { app, mock, limit } = freshApp();
+
+    for (let i = 0; i < limit; i++) {
+      await request(app).post('/api/v1/auth/resend-signup').send({ email: 'a@b.com' });
+    }
+    mock.queueResult({ error: null });
+    expect((await request(app).post('/api/v1/auth/resend-signup').send({ email: 'a@b.com' })).status).toBe(429);
+
+    // Exhausted resend does not block verifying the code already received...
+    const verify = await request(app).post('/api/v1/auth/verify-signup').send({ email: 'a@b.com', code: 'nope' });
+    expect(verify.status).toBe(400);
+    // ...nor asking for a password reset.
+    const forgot = await request(app).post('/api/v1/auth/forgot-password').send({ email: 'a@b.com' });
+    expect(forgot.status).toBe(200);
+  });
 });

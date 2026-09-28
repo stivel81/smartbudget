@@ -57,6 +57,10 @@ export const resetPasswordLimiter = passwordResetLimiter();
 // Change-password verifies the current password, so it is a guessing vector
 // for anyone holding a (stolen) access token — same strict budget, own counter.
 export const changePasswordLimiter = passwordResetLimiter();
+// Signup confirmation mirrors reset: verify-signup guesses a 6-digit code
+// (brute-force vector), resend-signup sends email (spam/cost vector).
+export const verifySignupLimiter = passwordResetLimiter();
+export const resendSignupLimiter = passwordResetLimiter();
 
 // Scan calls Claude (real cost per request) — cap per-IP request rate.
 export const scanLimiter = rateLimit({
@@ -109,10 +113,13 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', version: '1.0.0' });
 });
 
-// Auth routes (password reset/change get their own tighter limits first)
+// Auth routes (password reset/change and signup confirmation get their own
+// tighter limits first)
 app.use('/api/v1/auth/forgot-password', forgotPasswordLimiter);
 app.use('/api/v1/auth/reset-password', resetPasswordLimiter);
 app.use('/api/v1/auth/change-password', changePasswordLimiter);
+app.use('/api/v1/auth/verify-signup', verifySignupLimiter);
+app.use('/api/v1/auth/resend-signup', resendSignupLimiter);
 app.use('/api/v1/auth', authLimiter, authRouter);
 
 // Receipt routes (scan hits the Claude API, so it gets its own tighter limit)

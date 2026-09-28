@@ -93,6 +93,7 @@ export const mockSignInWithPassword = jest.fn();
 export const mockRefreshSession = jest.fn();
 export const mockAdminSignOut = jest.fn();
 export const mockResetPasswordForEmail = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
+export const mockResend = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
 
 // Password reset runs verifyOtp + updateUser on a fresh per-request client
 // (createIsolatedAuthClient). Each call here returns a *new* object whose
@@ -124,6 +125,7 @@ export const supabaseAuth = {
     signInWithPassword: mockSignInWithPassword,
     refreshSession: mockRefreshSession,
     resetPasswordForEmail: mockResetPasswordForEmail,
+    resend: mockResend,
     admin: { signOut: mockAdminSignOut },
   },
 };

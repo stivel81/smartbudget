@@ -23,11 +23,56 @@ export const passwordRuleError = (password: string): string | null => {
   return null;
 };
 
-const isValidResetCode = (code: string): boolean => /^\d{6}$/.test(code);
+// Emailed one-time codes (password reset, signup confirmation) are 6 digits.
+const isValidOtpCode = (code: string): boolean => /^\d{6}$/.test(code);
 
 const FORGOT_PASSWORD_MESSAGE =
   'If an account exists for that email, a 6-digit reset code has been sent.';
+export const RESEND_SIGNUP_MESSAGE =
+  'If that email is waiting to be verified, a new 6-digit code has been sent.';
 const INVALID_CODE_MESSAGE = 'Invalid or expired code';
+
+// Machine-readable error code the app keys off (never the message text) to
+// send an unconfirmed user to the verify-email screen. Only returned after
+// Supabase has accepted the password, so it reveals nothing to someone who
+// doesn't already know the account's credentials.
+export const EMAIL_NOT_CONFIRMED_CODE = 'email_not_confirmed';
+
+interface SessionLike {
+  access_token: string;
+  refresh_token: string;
+}
+
+interface UserLike {
+  id: string;
+  email?: string;
+  user_metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * The display name stored at signup (user_metadata.name, the same value the
+ * profiles.name trigger copies). Trimmed; null when absent or not a string.
+ */
+export const displayNameOf = (user: UserLike): string | null => {
+  const name = user.user_metadata?.name;
+  if (typeof name !== 'string') return null;
+  const trimmed = name.trim();
+  return trimmed ? trimmed : null;
+};
+
+// The one session shape every sign-in route returns (/login, /refresh,
+// /reset-password, /verify-signup), so the app can treat them identically.
+export const sessionPayload = (session: SessionLike, user: UserLike) => ({
+  session: {
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: displayNameOf(user),
+    },
+  },
+});
 
 interface SignupRequest {
   email?: string;
@@ -48,6 +93,15 @@ interface ResetPasswordRequest {
   email?: unknown;
   code?: unknown;
   newPassword?: unknown;
+}
+
+interface VerifySignupRequest {
+  email?: unknown;
+  code?: unknown;
+}
+
+interface ResendSignupRequest {
+  email?: unknown;
 }
 
 interface ChangePasswordRequest {
@@ -167,10 +221,14 @@ router.post('/login', async (req: Request, res: Response) => {
     });
 
     if (error) {
-      if (error.message.includes('Email not confirmed')) {
+      if (
+        (error as { code?: string }).code === EMAIL_NOT_CONFIRMED_CODE ||
+        error.message.includes('Email not confirmed')
+      ) {
         return res.status(401).json({
-          error: 'Please verify your email before signing in — check your inbox for the confirmation link.',
+          error: 'Please verify your email before signing in — enter the 6-digit code we emailed you.',
           status: 401,
+          code: EMAIL_NOT_CONFIRMED_CODE,
         });
       }
       if ((error as { code?: string }).code === 'user_banned') {
@@ -199,17 +257,7 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Return session data
-    return res.status(200).json({
-      session: {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-        },
-      },
-    });
+    return res.status(200).json(sessionPayload(data.session, data.user));
   } catch (err) {
     console.error('Login error:', err);
     return res.status(500).json({
@@ -244,16 +292,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       });
     }
 
-    return res.status(200).json({
-      session: {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-        },
-      },
-    });
+    return res.status(200).json(sessionPayload(data.session, data.user));
   } catch (err) {
     console.error('Refresh error:', err);
     return res.status(500).json({
@@ -265,7 +304,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
 // POST /api/v1/auth/forgot-password — email the user a 6-digit recovery
 // code (the "Reset Password" email template must render {{ .Token }}, see
-// docs/PASSWORD_RESET_SETUP.md). No deep links: the code is typed into the
+// docs/SUPABASE_EMAIL_SETUP.md). No deep links: the code is typed into the
 // app and redeemed via /reset-password.
 //
 // Anti-enumeration: every well-formed request gets the same 200 + generic
@@ -334,7 +373,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
   }
 
   const normalizedCode = code.trim();
-  if (!isValidResetCode(normalizedCode)) {
+  if (!isValidOtpCode(normalizedCode)) {
     return res.status(400).json({
       error: 'Code must be 6 digits',
       status: 400,
@@ -384,16 +423,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       });
     }
 
-    return res.status(200).json({
-      session: {
-        access_token: otpData.session.access_token,
-        refresh_token: otpData.session.refresh_token,
-        user: {
-          id: otpData.user.id,
-          email: otpData.user.email,
-        },
-      },
-    });
+    return res.status(200).json(sessionPayload(otpData.session, otpData.user));
   } catch (err) {
     console.error('Reset password error:', err);
     return res.status(500).json({
@@ -401,6 +431,107 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       status: 500,
     });
   }
+});
+
+// POST /api/v1/auth/verify-signup — confirm a new account with the 6-digit
+// code from the "Confirm sign up" email (the template must render
+// {{ .Token }}, see docs/SUPABASE_EMAIL_SETUP.md), then return a session
+// in the same shape as /login so the app signs straight in.
+//
+// verifyOtp() stores the resulting session on the client instance, so it
+// runs on a fresh per-request client (createIsolatedAuthClient) — never the
+// shared supabaseAuth (the bug class fixed in 9062cae). Any Supabase
+// rejection (wrong, expired, already used, unknown email) collapses into one
+// generic 400. Rate limited per IP in index.ts (5/15min) to cap code guessing.
+router.post('/verify-signup', async (req: Request, res: Response) => {
+  const { email, code } = req.body as VerifySignupRequest;
+
+  if (
+    typeof email !== 'string' || !email.trim() ||
+    typeof code !== 'string' || !code.trim()
+  ) {
+    return res.status(400).json({
+      error: 'Missing required fields: email, code',
+      status: 400,
+    });
+  }
+
+  const normalizedEmail = email.trim();
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({
+      error: 'Invalid email format',
+      status: 400,
+    });
+  }
+
+  const normalizedCode = code.trim();
+  if (!isValidOtpCode(normalizedCode)) {
+    return res.status(400).json({
+      error: 'Code must be 6 digits',
+      status: 400,
+    });
+  }
+
+  try {
+    const client = createIsolatedAuthClient();
+    const { data, error } = await client.auth.verifyOtp({
+      email: normalizedEmail,
+      token: normalizedCode,
+      type: 'signup',
+    });
+
+    if (error || !data.session || !data.user) {
+      if (error) console.warn('Verify signup: OTP verification failed:', error.message);
+      return res.status(400).json({
+        error: INVALID_CODE_MESSAGE,
+        status: 400,
+      });
+    }
+
+    return res.status(200).json(sessionPayload(data.session, data.user));
+  } catch (err) {
+    console.error('Verify signup error:', err);
+    return res.status(500).json({
+      error: 'Internal server error',
+      status: 500,
+    });
+  }
+});
+
+// POST /api/v1/auth/resend-signup — email a fresh signup confirmation code.
+//
+// Anti-enumeration: every well-formed request gets the same 200 + generic
+// message whether the email is unknown, pending, or already confirmed, and
+// whatever Supabase says (its own 60s per-user limit, outage). Failures are
+// logged server-side only. Rate limited per IP in index.ts (5/15min).
+router.post('/resend-signup', async (req: Request, res: Response) => {
+  const { email } = req.body as ResendSignupRequest;
+
+  if (typeof email !== 'string' || !email.trim()) {
+    return res.status(400).json({
+      error: 'Missing required field: email',
+      status: 400,
+    });
+  }
+
+  const normalizedEmail = email.trim();
+  if (!isValidEmail(normalizedEmail)) {
+    return res.status(400).json({
+      error: 'Invalid email format',
+      status: 400,
+    });
+  }
+
+  try {
+    const { error } = await supabaseAuth.auth.resend({ type: 'signup', email: normalizedEmail });
+    if (error) {
+      console.error('Resend signup: Supabase error (hidden from client):', error);
+    }
+  } catch (err) {
+    console.error('Resend signup: unexpected error (hidden from client):', err);
+  }
+
+  return res.status(200).json({ message: RESEND_SIGNUP_MESSAGE });
 });
 
 // POST /api/v1/auth/change-password — signed-in user changes their password.
