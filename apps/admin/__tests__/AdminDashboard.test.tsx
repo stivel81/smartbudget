@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AdminDashboard from '../app/AdminDashboard';
 import * as api from '../lib/api';
@@ -42,6 +42,15 @@ jest.mock('../app/views/SettingsView', () => ({ __esModule: true, default: () =>
 function renderDashboard(onSignOut = jest.fn()) {
   render(<AdminDashboard accessToken="tok" userEmail="admin@example.com" onSignOut={onSignOut} />);
   return { onSignOut };
+}
+
+// Wait until the failed-scans promise has settled AND React has applied the
+// result. Asserting "no dot" before this would pass vacuously.
+async function settleFailedScansCheck() {
+  await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
+  await act(async () => {
+    await mocked.getFailedScans.mock.results[0].value.catch(() => {});
+  });
 }
 
 beforeEach(() => {
@@ -132,8 +141,7 @@ describe('AdminDashboard failed-scan alerts', () => {
       failures: [makeFailure({ created_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() })],
     });
     renderDashboard();
-    await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
-    await Promise.resolve();
+    await settleFailedScansCheck();
     expect(screen.queryByTestId('bell-alert-dot')).not.toBeInTheDocument();
     expect(screen.queryByTestId('nav-alert-dot-AI Monitor')).not.toBeInTheDocument();
   });
@@ -149,8 +157,7 @@ describe('AdminDashboard failed-scan alerts', () => {
 
   it('shows no dots when there are no failed scans', async () => {
     renderDashboard();
-    await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
-    await Promise.resolve();
+    await settleFailedScansCheck();
     expect(screen.queryByTestId('bell-alert-dot')).not.toBeInTheDocument();
     expect(screen.queryByTestId('nav-alert-dot-AI Monitor')).not.toBeInTheDocument();
   });
@@ -158,8 +165,7 @@ describe('AdminDashboard failed-scan alerts', () => {
   it('stays quiet when the failed-scan check errors', async () => {
     mocked.getFailedScans.mockRejectedValue({ message: 'boom' });
     renderDashboard();
-    await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
-    await Promise.resolve();
+    await settleFailedScansCheck();
     expect(screen.queryByTestId('bell-alert-dot')).not.toBeInTheDocument();
     expect(screen.queryByText('boom')).not.toBeInTheDocument();
   });
