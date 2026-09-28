@@ -17,14 +17,21 @@ import { AuthContext } from '../App';
 import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';
+import {
+  CategoryTotal,
+  budgetUsagePct,
+  budgetsByCategory as indexBudgetsByCategory,
+  percentOf,
+  receiptsForMonth,
+  receiptsSince,
+  sortedCategoryTotals,
+  sumLimits,
+  sumTotals,
+} from '../lib/spending';
+import { greetingFor } from '../lib/greeting';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
-}
-
-interface CategoryTotal {
-  category: string;
-  spent: number;
 }
 
 const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
@@ -39,9 +46,10 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
   budget,
 }) => {
   const meta = categoryMeta(item.category);
-  const share = totalSpent > 0 ? (item.spent / totalSpent) * 100 : 0;
   // Use budget percentage if budget exists, otherwise use share of total spend
-  const displayPercentage = budget ? (item.spent / budget.monthly_limit) * 100 : share;
+  const displayPercentage = budget
+    ? budgetUsagePct(item.spent, budget.monthly_limit)
+    : percentOf(item.spent, totalSpent);
   const barColor = budget ? budgetBarColor(displayPercentage) : COLORS.success;
 
   return (
@@ -53,6 +61,7 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
       <Text style={styles.categoryAmount}>₪{item.spent.toFixed(0)}</Text>
       <View style={styles.progressBarContainer}>
         <View
+          testID={`category-bar-${item.category}`}
           style={[
             styles.progressBar,
             { width: `${Math.min(displayPercentage, 100)}%`, backgroundColor: barColor },
@@ -184,29 +193,17 @@ export default function DashboardScreen(): React.ReactElement {
     }, [auth.accessToken])
   );
 
-  const totalSpent = receipts.reduce((sum, r) => sum + r.raw_response.total, 0);
   const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const thisWeekSpent = receipts
-    .filter((r) => new Date(r.created_at) >= weekAgo)
-    .reduce((sum, r) => sum + r.raw_response.total, 0);
-  const totalBudget = budgets.reduce((sum, b) => sum + b.monthly_limit, 0);
-  const budgetPercentage = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+  // Hero stats, category bars and budget % cover the current month only;
+  // the "Recent Receipts" list below still shows the latest receipts overall.
+  const monthReceipts = receiptsForMonth(receipts, now);
+  const totalSpent = sumTotals(monthReceipts);
+  const thisWeekSpent = sumTotals(receiptsSince(receipts, 7, now));
+  const totalBudget = sumLimits(budgets);
+  const budgetPercentage = budgetUsagePct(totalSpent, totalBudget);
 
-  const categoryTotals: CategoryTotal[] = Object.values(
-    receipts
-      .flatMap((r) => r.raw_response.items)
-      .reduce<Record<string, CategoryTotal>>((acc, item) => {
-        acc[item.category] = acc[item.category] || { category: item.category, spent: 0 };
-        acc[item.category].spent += item.amount;
-        return acc;
-      }, {})
-  ).sort((a, b) => b.spent - a.spent);
-
-  const budgetsByCategory = budgets.reduce<Record<string, Budget>>((acc, b) => {
-    acc[b.category] = b;
-    return acc;
-  }, {});
+  const categoryTotals = sortedCategoryTotals(monthReceipts);
+  const budgetsByCategory = indexBudgetsByCategory(budgets);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
@@ -218,7 +215,7 @@ export default function DashboardScreen(): React.ReactElement {
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.greeting}>Good morning</Text>
+            <Text style={styles.greeting} testID="dashboard-greeting">{greetingFor(now)}</Text>
             <Text style={styles.title}>My Finances</Text>
           </View>
           <Avatar initials={auth.userEmail ? auth.userEmail.substring(0, 2).toUpperCase() : 'U'} />
@@ -233,7 +230,7 @@ export default function DashboardScreen(): React.ReactElement {
         >
           <View style={styles.heroCardContent}>
             <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
-            <Text style={styles.heroAmount}>₪{totalSpent.toFixed(0)}</Text>
+            <Text style={styles.heroAmount} testID="hero-spent">₪{totalSpent.toFixed(0)}</Text>
             {totalBudget > 0 && (
               <Text style={styles.heroSubtitle}>of ₪{totalBudget.toFixed(0)} budget</Text>
             )}
@@ -241,17 +238,17 @@ export default function DashboardScreen(): React.ReactElement {
             {/* Stats row */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>₪{thisWeekSpent.toFixed(0)}</Text>
+                <Text style={styles.statValue} testID="hero-week">₪{thisWeekSpent.toFixed(0)}</Text>
                 <Text style={styles.statLabel}>This week</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{receipts.length}</Text>
+                <Text style={styles.statValue} testID="hero-count">{monthReceipts.length}</Text>
                 <Text style={styles.statLabel}>Receipts</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{Math.round(budgetPercentage)}%</Text>
+                <Text style={styles.statValue} testID="hero-budget-pct">{Math.round(budgetPercentage)}%</Text>
                 <Text style={styles.statLabel}>Budget used</Text>
               </View>
             </View>

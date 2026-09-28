@@ -16,6 +16,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
 import { COLORS, CATEGORY_META, budgetBarColor, ALERT_THRESHOLD_PCT, DANGER_THRESHOLD_PCT } from '../lib/theme';
+import {
+  budgetUsagePct,
+  budgetsAtOrAbove,
+  categoryTotals,
+  receiptsForMonth,
+  sumLimits,
+  sumSpent,
+  withSpend,
+} from '../lib/spending';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -32,7 +41,8 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[]; overDanger: BudgetW
   if (overBudget.length === 0) return null;
 
   const isRed = overDanger.length > 0;
-  const names = (isRed ? overDanger : overBudget).map((b) => b.category).join(' and ');
+  const listed = isRed ? overDanger : overBudget;
+  const names = listed.map((b) => b.category).join(' and ');
 
   return (
     <View
@@ -50,7 +60,7 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[]; overDanger: BudgetW
         color={isRed ? COLORS.buttonText : COLORS.warning}
       />
       <Text style={[styles.alertText, isRed && { color: COLORS.buttonText }]}>
-        {names} {overDanger.length === 1 ? 'is' : 'are'} at {isRed ? '100%+' : `${ALERT_THRESHOLD_PCT}%+`} of budget
+        {names} {listed.length === 1 ? 'is' : 'are'} at {isRed ? '100%+' : `${ALERT_THRESHOLD_PCT}%+`} of budget
       </Text>
     </View>
   );
@@ -58,11 +68,11 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[]; overDanger: BudgetW
 
 const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ item, onPress }) => {
   const meta = categoryMeta(item.category);
-  const percentage = (item.spent / item.monthly_limit) * 100;
+  const percentage = budgetUsagePct(item.spent, item.monthly_limit);
   const barColor = budgetBarColor(percentage);
 
   return (
-    <TouchableOpacity style={styles.budgetItem} onPress={onPress}>
+    <TouchableOpacity style={styles.budgetItem} onPress={onPress} testID={`budget-item-${item.id}`}>
       <View style={styles.budgetItemHeader}>
         <View style={styles.budgetItemLeft}>
           <View style={[styles.budgetItemIcon, { backgroundColor: meta.backgroundColor }]}>
@@ -136,29 +146,27 @@ export default function BudgetScreen(): React.ReactElement {
     }, [auth.accessToken])
   );
 
-  const categorySpend = useMemo(() => {
-    const totals: Record<string, number> = {};
-    for (const receipt of receipts) {
-      for (const item of receipt.raw_response.items) {
-        totals[item.category] = (totals[item.category] || 0) + item.amount;
-      }
-    }
-    return totals;
-  }, [receipts]);
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
+
+  // Budgets are monthly limits, so only this month's receipts count toward them.
+  const categorySpend = useMemo(
+    () => categoryTotals(receiptsForMonth(receipts, now)),
+    // Keyed on the month (not `now`) so it recomputes on month rollover, not every render.
+    [receipts, monthKey]
+  );
 
   const budgetsWithSpend: BudgetWithSpend[] = useMemo(
-    () => budgets.map((b) => ({ ...b, spent: categorySpend[b.category] || 0 })),
+    () => withSpend(budgets, categorySpend),
     [budgets, categorySpend]
   );
 
-  const overBudget = budgetsWithSpend.filter(
-    (b) => (b.spent / b.monthly_limit) * 100 >= ALERT_THRESHOLD_PCT
-  );
-  const overDanger = budgetsWithSpend.filter((b) => (b.spent / b.monthly_limit) * 100 >= DANGER_THRESHOLD_PCT);
-  const totalSpent = budgetsWithSpend.reduce((sum, b) => sum + b.spent, 0);
-  const totalBudget = budgetsWithSpend.reduce((sum, b) => sum + b.monthly_limit, 0);
+  const overBudget = budgetsAtOrAbove(budgetsWithSpend, ALERT_THRESHOLD_PCT);
+  const overDanger = budgetsAtOrAbove(budgetsWithSpend, DANGER_THRESHOLD_PCT);
+  const totalSpent = sumSpent(budgetsWithSpend);
+  const totalBudget = sumLimits(budgetsWithSpend);
 
-  const currentMonth = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   const openAddModal = () => {
     setModalCategory(RECEIPT_CATEGORIES[0]);
@@ -206,7 +214,7 @@ export default function BudgetScreen(): React.ReactElement {
             <Text style={styles.monthText}>{currentMonth}</Text>
             <Text style={styles.title}>Budget</Text>
           </View>
-          <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+          <TouchableOpacity style={styles.addButton} onPress={openAddModal} testID="budget-add-button">
             <MaterialCommunityIcons name="plus" size={24} color={COLORS.button} />
           </TouchableOpacity>
         </View>
@@ -266,7 +274,13 @@ export default function BudgetScreen(): React.ReactElement {
         )}
       </ScrollView>
 
-      <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+        testID="budget-modal"
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Set Budget</Text>
@@ -278,6 +292,7 @@ export default function BudgetScreen(): React.ReactElement {
                   key={cat}
                   style={[styles.categoryChip, modalCategory === cat && styles.categoryChipSelected]}
                   onPress={() => setModalCategory(cat)}
+                  testID={`budget-category-chip-${cat}`}
                 >
                   <Text
                     style={[
@@ -299,6 +314,7 @@ export default function BudgetScreen(): React.ReactElement {
               keyboardType="numeric"
               placeholder="e.g. 1500"
               placeholderTextColor={COLORS.textSecondary}
+              testID="budget-limit-input"
             />
 
             <View style={styles.modalButtons}>
@@ -306,10 +322,16 @@ export default function BudgetScreen(): React.ReactElement {
                 style={styles.modalCancelButton}
                 onPress={() => setModalVisible(false)}
                 disabled={saving}
+                testID="budget-cancel-button"
               >
                 <Text style={styles.modalCancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveButton} onPress={saveBudget} disabled={saving}>
+              <TouchableOpacity
+                style={styles.modalSaveButton}
+                onPress={saveBudget}
+                disabled={saving}
+                testID="budget-save-button"
+              >
                 {saving ? (
                   <ActivityIndicator color={COLORS.buttonText} />
                 ) : (
