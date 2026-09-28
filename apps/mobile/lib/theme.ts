@@ -22,21 +22,22 @@ export const COLORS = {
   alertBorder: '#ffd60a',
   // Dark surfaces (camera, etc)
   darkBg: '#1a1a1a',
+  // Receipt scanner (Screen 4) — dark theme
+  scannerBg: '#000000',
+  scannerCorner: '#ffffff',
+  scannerScanLine: 'rgba(255, 255, 255, 0.4)',
+  scannerHint: 'rgba(255, 255, 255, 0.4)',
+  scannerCancel: 'rgba(255, 255, 255, 0.6)',
+  scannerControlBg: 'rgba(255, 255, 255, 0.08)',
   // Additional colors for UI elements
-  scanLineGreen: '#22c55e',
-  scanLineGlow: 'rgba(34, 197, 94, 0.8)',
   chipBg: '#fafafa',
-  signOutBg: '#fee2e2',
-  signOutBorder: '#fca5a5',
   errorBg: '#fee2e2',
   // Additional UI element colors
   alertTextColor: '#92400e',
-  successBg: '#f0fdf4',
   // Opacity/overlay colors
   overlay: 'rgba(0, 0, 0, 0.4)',
   heroSubtextOpacity: 'rgba(255, 255, 255, 0.4)',
   heroLabelOpacity: 'rgba(255, 255, 255, 0.8)',
-  controlBorderOpacity: 'rgba(255, 255, 255, 0.3)',
   modalOverlay: 'rgba(0, 0, 0, 0.6)',
   heroStatsRowBg: 'rgba(255, 255, 255, 0.08)',
   heroStatsDivider: 'rgba(255, 255, 255, 0.2)',

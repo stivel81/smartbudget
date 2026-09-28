@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useContext } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,33 +6,43 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Animated,
-  Dimensions,
+  Easing,
   ActivityIndicator,
   Alert,
   TextInput,
+  LayoutChangeEvent,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { setStatusBarStyle } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
 import { AuthContext } from '../App';
 import { textDirectionStyle } from '../lib/rtl';
-import { COLORS } from '../lib/theme';
+import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
+import {
+  ScanResult,
+  categoryIconFor,
+  resizeTargetFor,
+  resolveReceiptEdits,
+  toScanResult,
+} from '../lib/scan';
+import { errorMessage } from '../lib/errors';
 
-// Claude resizes any image above this (long edge) before billing/processing
-// it, so uploading larger buys nothing — this is also the size we store.
-const MAX_IMAGE_DIMENSION = 1568;
 const IMAGE_COMPRESSION = 0.7;
+const SCAN_LINE_HEIGHT = 2;
+const SCAN_LINE_DURATION_MS = 2000;
+const CORNER_SIZE = 22;
+const CORNER_WIDTH = 2;
+// Far enough below the screen edge to hide the result card before it slides up.
+const CARD_HIDDEN_OFFSET = 500;
 
 async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<string> {
   const context = ImageManipulator.manipulate(asset.uri);
-  const longEdge = Math.max(asset.width, asset.height);
-  if (longEdge > MAX_IMAGE_DIMENSION) {
-    if (asset.width >= asset.height) {
-      context.resize({ width: MAX_IMAGE_DIMENSION });
-    } else {
-      context.resize({ height: MAX_IMAGE_DIMENSION });
-    }
+  const target = resizeTargetFor(asset.width, asset.height);
+  if (target) {
+    context.resize(target);
   }
 
   const image = await context.renderAsync();
@@ -46,106 +56,76 @@ async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<str
   return result.base64;
 }
 
-const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-const CAMERA_HEIGHT = screenHeight * 0.65;
+/**
+ * Drives the decorative scan line: a 0→1 progress value looping top-to-bottom
+ * for as long as the screen is mounted. The loop is stopped on unmount so no
+ * animation frames/timers outlive the component.
+ */
+function useScanLineProgress(): Animated.Value {
+  const progress = useRef(new Animated.Value(0)).current;
 
-interface AIResult {
-  id: string;
-  merchant: string;
-  category: string;
-  date: string;
-  total: number;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: SCAN_LINE_DURATION_MS,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [progress]);
+
+  return progress;
 }
 
-const CATEGORIES = [
-  { id: 'groceries', name: 'Groceries', icon: 'cart' },
-  { id: 'dining', name: 'Dining', icon: 'silverware-fork-knife' },
-  { id: 'transport', name: 'Transport', icon: 'bus' },
-  { id: 'entertainment', name: 'Entertainment', icon: 'television' },
-  { id: 'health', name: 'Health', icon: 'heart' },
-];
+type Corner = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+const CORNERS: Corner[] = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
 
-interface CornerGuideProps {
-  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+const CornerGuide: React.FC<{ corner: Corner }> = ({ corner }) => (
+  <View style={[styles.cornerGuide, styles[corner]]} testID={`scan-corner-${corner}`} />
+);
+
+interface ResultRowProps {
+  label: string;
+  children: React.ReactNode;
+  last?: boolean;
 }
 
-const CornerGuide: React.FC<CornerGuideProps> = ({ position }) => {
-  const styles: Record<string, any> = {
-    'top-left': {
-      top: 20,
-      left: 20,
-      borderTopWidth: 2,
-      borderLeftWidth: 2,
-    },
-    'top-right': {
-      top: 20,
-      right: 20,
-      borderTopWidth: 2,
-      borderRightWidth: 2,
-    },
-    'bottom-left': {
-      bottom: 20,
-      left: 20,
-      borderBottomWidth: 2,
-      borderLeftWidth: 2,
-    },
-    'bottom-right': {
-      bottom: 20,
-      right: 20,
-      borderBottomWidth: 2,
-      borderRightWidth: 2,
-    },
-  };
-
-  return (
-    <View
-      style={[
-        componentStyles.cornerGuide,
-        styles[position],
-        { borderColor: COLORS.scanLineGreen },
-      ]}
-    />
-  );
-};
+const ResultRow: React.FC<ResultRowProps> = ({ label, children, last }) => (
+  <View style={[styles.resultRow, last && styles.resultRowLast]}>
+    <Text style={styles.resultLabel}>{label}</Text>
+    <View style={styles.resultValueContainer}>{children}</View>
+  </View>
+);
 
 export default function ScanScreen(): React.ReactElement {
   const [showResult, setShowResult] = useState(false);
-  const [result, setResult] = useState<AIResult | null>(null);
+  const [result, setResult] = useState<ScanResult | null>(null);
   const [editedMerchant, setEditedMerchant] = useState('');
   const [editedTotal, setEditedTotal] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [frameHeight, setFrameHeight] = useState(0);
   const auth = useContext(AuthContext);
-  const slideAnim = useRef(new Animated.Value(300)).current;
-  const scanLineAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(CARD_HIDDEN_OFFSET)).current;
+  const scanLineProgress = useScanLineProgress();
 
-  // Animate scan line continuously
-  useEffect(() => {
-    const animateScanLine = () => {
-      Animated.sequence([
-        Animated.timing(scanLineAnim, {
-          toValue: CAMERA_HEIGHT - 40,
-          duration: 2000,
-          useNativeDriver: false,
-        }),
-        Animated.timing(scanLineAnim, {
-          toValue: 0,
-          duration: 0,
-          useNativeDriver: false,
-        }),
-      ]).start(() => animateScanLine());
-    };
+  // Dark screen: light status-bar content while focused, back to the app
+  // default when the user leaves the tab.
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light');
+      return () => setStatusBarStyle('auto');
+    }, [])
+  );
 
-    animateScanLine();
-
-    return () => scanLineAnim.setValue(0);
-  }, [scanLineAnim]);
-
-  const showResultCard = (result: AIResult) => {
-    setResult(result);
-    setEditedMerchant(result.merchant);
-    setEditedTotal(result.total.toFixed(2));
+  const showResultCard = (scanned: ScanResult) => {
+    setResult(scanned);
+    setEditedMerchant(scanned.merchant);
+    setEditedTotal(scanned.total.toFixed(2));
     setShowResult(true);
 
     // Animate result card sliding up
@@ -166,18 +146,9 @@ export default function ScanScreen(): React.ReactElement {
     try {
       const base64 = await resizeForUpload(asset);
       const { receipt } = await scanReceipt(base64, 'image/jpeg', auth.accessToken);
-      const extraction = receipt.raw_response;
-      const categories = Array.from(new Set(extraction.items.map((item) => item.category)));
-
-      showResultCard({
-        id: receipt.id,
-        merchant: extraction.merchant,
-        category: categories.length > 0 ? categories.join(', ') : 'Uncategorized',
-        date: extraction.date,
-        total: extraction.total,
-      });
-    } catch (err: any) {
-      Alert.alert('Scan failed', err.message || 'Could not analyze this receipt.');
+      showResultCard(toScanResult(receipt));
+    } catch (err: unknown) {
+      Alert.alert('Scan failed', errorMessage(err, 'Could not analyze this receipt.'));
     } finally {
       setLoading(false);
     }
@@ -190,12 +161,12 @@ export default function ScanScreen(): React.ReactElement {
       return;
     }
 
-    const result = await ImagePicker.launchCameraAsync({
+    const picked = await ImagePicker.launchCameraAsync({
       quality: 0.7,
     });
 
-    if (!result.canceled && result.assets[0]) {
-      await processImage(result.assets[0]);
+    if (!picked.canceled && picked.assets[0]) {
+      await processImage(picked.assets[0]);
     }
   };
 
@@ -206,19 +177,19 @@ export default function ScanScreen(): React.ReactElement {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
+    const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.7,
     });
 
-    if (!result.canceled && result.assets[0]) {
-      await processImage(result.assets[0]);
+    if (!picked.canceled && picked.assets[0]) {
+      await processImage(picked.assets[0]);
     }
   };
 
   const handleDismiss = () => {
     Animated.timing(slideAnim, {
-      toValue: 300,
+      toValue: CARD_HIDDEN_OFFSET,
       duration: 300,
       useNativeDriver: false,
     }).start(() => {
@@ -227,6 +198,7 @@ export default function ScanScreen(): React.ReactElement {
     });
   };
 
+  // Discard: the scan already persisted the receipt, so cancelling deletes it.
   const handleCancel = async () => {
     if (!result || !auth.accessToken) {
       handleDismiss();
@@ -237,277 +209,351 @@ export default function ScanScreen(): React.ReactElement {
     try {
       await deleteReceipt(result.id, auth.accessToken);
       handleDismiss();
-    } catch (err: any) {
-      Alert.alert('Failed to discard', err.message || 'Please try again.');
+    } catch (err: unknown) {
+      Alert.alert('Failed to discard', errorMessage(err, 'Please try again.'));
     } finally {
       setDiscarding(false);
     }
   };
 
+  // Save: the receipt is already stored; only PATCH fields the user edited.
   const handleConfirm = async () => {
     if (!result || !auth.accessToken) {
       handleDismiss();
       return;
     }
 
-    const totalNumber = Number(editedTotal);
-    if (!editedMerchant.trim()) {
-      Alert.alert('Merchant required', 'Merchant name cannot be empty.');
+    const outcome = resolveReceiptEdits(result, editedMerchant, editedTotal);
+    if (outcome.kind === 'invalid') {
+      Alert.alert(outcome.title, outcome.message);
       return;
     }
-    if (!editedTotal || !(totalNumber > 0)) {
-      Alert.alert('Invalid total', 'Total must be a positive number.');
-      return;
-    }
-
-    const merchantChanged = editedMerchant.trim() !== result.merchant;
-    const totalChanged = totalNumber !== result.total;
-
-    if (!merchantChanged && !totalChanged) {
+    if (outcome.kind === 'unchanged') {
       handleDismiss();
       return;
     }
 
     setConfirming(true);
     try {
-      await updateReceipt(
-        result.id,
-        {
-          ...(merchantChanged && { merchant: editedMerchant.trim() }),
-          ...(totalChanged && { total: totalNumber }),
-        },
-        auth.accessToken
-      );
+      await updateReceipt(result.id, outcome.updates, auth.accessToken);
       handleDismiss();
-    } catch (err: any) {
-      Alert.alert('Failed to save changes', err.message || 'Please try again.');
+    } catch (err: unknown) {
+      Alert.alert('Failed to save changes', errorMessage(err, 'Please try again.'));
     } finally {
       setConfirming(false);
     }
   };
 
+  const busy = confirming || discarding;
+  const canCancel = showResult && result !== null && !busy;
+  const scanLineTravel = Math.max(frameHeight - SCAN_LINE_HEIGHT, 0);
+
+  const onFrameLayout = (event: LayoutChangeEvent) => {
+    setFrameHeight(event.nativeEvent.layout.height);
+  };
+
   return (
-    <SafeAreaView style={componentStyles.container}>
-      {/* Camera Viewfinder */}
-      <View style={componentStyles.cameraViewfinder}>
-        {/* Corner Guides */}
-        <CornerGuide position="top-left" />
-        <CornerGuide position="top-right" />
-        <CornerGuide position="bottom-left" />
-        <CornerGuide position="bottom-right" />
-
-        {/* Animated Scan Line */}
-        <Animated.View
-          style={[
-            componentStyles.scanLine,
-            {
-              transform: [{ translateY: scanLineAnim }],
-            },
-          ]}
-        />
-
-        {/* Instruction Text */}
-        <View style={componentStyles.instructionOverlay}>
-          <Text style={componentStyles.instructionText}>
-            Position receipt within frame
-          </Text>
+    <SafeAreaView style={styles.container}>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <View style={styles.topBarSide} />
+        <Text style={styles.topBarTitle} accessibilityRole="header">
+          Scan Receipt
+        </Text>
+        <View style={[styles.topBarSide, styles.topBarSideRight]}>
+          <TouchableOpacity
+            onPress={handleCancel}
+            disabled={!canCancel}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canCancel }}
+            testID="scan-cancel-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {discarding ? (
+              <ActivityIndicator size="small" color={COLORS.scannerCancel} />
+            ) : (
+              <Text style={[styles.cancelText, !canCancel && styles.cancelTextDisabled]}>Cancel</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Camera Controls */}
-      <View style={componentStyles.controls}>
+      {/* Viewfinder */}
+      <View style={styles.viewfinder}>
+        <View style={styles.frame} onLayout={onFrameLayout} testID="scan-frame">
+          {CORNERS.map((corner) => (
+            <CornerGuide key={corner} corner={corner} />
+          ))}
+
+          <Animated.View
+            testID="scan-line"
+            style={[
+              styles.scanLine,
+              {
+                transform: [
+                  {
+                    translateY: scanLineProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, scanLineTravel],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        </View>
+
+        <Text style={styles.hintText} testID="scan-hint">
+          {loading ? 'Analyzing receipt…' : 'Align receipt within the frame'}
+        </Text>
+      </View>
+
+      {/* Camera controls */}
+      <View style={styles.controls}>
         <TouchableOpacity
-          style={componentStyles.controlButton}
+          style={styles.controlButton}
           onPress={handlePickFromGallery}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Choose from gallery"
+          testID="scan-gallery-button"
         >
-          <MaterialCommunityIcons name="image" size={24} color={COLORS.textPrimary} />
+          <MaterialCommunityIcons name="image-outline" size={20} color={COLORS.buttonText} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={componentStyles.captureButton}
+          style={styles.captureButton}
           onPress={handleCapture}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Take photo"
+          testID="scan-capture-button"
         >
           {loading ? (
-            <ActivityIndicator color={COLORS.buttonText} />
+            <ActivityIndicator color={COLORS.textPrimary} testID="scan-loading" />
           ) : (
-            <View style={componentStyles.captureButtonInner} />
+            <MaterialCommunityIcons name="camera" size={26} color={COLORS.textPrimary} />
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={componentStyles.controlButton}
-          onPress={() => {
-            /* Flash toggle would go here */
-          }}
-        >
-          <MaterialCommunityIcons
-            name="flash"
-            size={24}
-            color={COLORS.textPrimary}
-          />
-        </TouchableOpacity>
+        {/* The system camera launched by expo-image-picker has its own flash
+            control; there is no picker option to drive it from here, so this
+            slot stays empty (keeps the capture button centred). */}
+        <View style={styles.controlSpacer} />
       </View>
 
-      {/* AI Result Card */}
+      {/* AI result card */}
       {showResult && result && (
         <Animated.View
-          style={[
-            componentStyles.resultCard,
-            {
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
+          testID="scan-result-card"
+          style={[styles.resultCard, { transform: [{ translateY: slideAnim }] }]}
         >
-          <View style={componentStyles.resultContent}>
-            {/* Header */}
-            <View style={componentStyles.resultHeader}>
-              <Text style={componentStyles.resultTitle}>Extraction Complete</Text>
-              <TouchableOpacity onPress={handleDismiss}>
-                <MaterialCommunityIcons
-                  name="close"
-                  size={24}
-                  color={COLORS.textPrimary}
-                />
-              </TouchableOpacity>
-            </View>
+          <View style={styles.dragPill} />
 
-            {/* Result Items */}
-            <View style={componentStyles.resultItem}>
-              <Text style={componentStyles.resultLabel}>Merchant</Text>
+          <View style={styles.resultHeader}>
+            <MaterialCommunityIcons name="creation" size={18} color={COLORS.textPrimary} />
+            <Text style={styles.resultTitle}>AI Extracted</Text>
+            <TouchableOpacity
+              onPress={handleDismiss}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              testID="scan-close-button"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MaterialCommunityIcons name="close" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.resultRows}>
+            <ResultRow label="Merchant">
               <TextInput
-                style={[componentStyles.resultInput, textDirectionStyle(editedMerchant)]}
+                testID="scan-merchant-input"
+                style={[styles.resultInput, textDirectionStyle(editedMerchant)]}
                 value={editedMerchant}
                 onChangeText={setEditedMerchant}
-                editable={!confirming && !discarding}
+                editable={!busy}
+                placeholderTextColor={COLORS.placeholder}
               />
-            </View>
+            </ResultRow>
 
-            <View style={componentStyles.resultItem}>
-              <Text style={componentStyles.resultLabel}>Category</Text>
-              <Text style={componentStyles.resultValue}>{result.category}</Text>
-            </View>
+            <ResultRow label="Category">
+              <View style={styles.categoryValue}>
+                <View style={styles.categoryIcon}>
+                  <MaterialCommunityIcons
+                    name={categoryIconFor(result.category) as keyof typeof MaterialCommunityIcons.glyphMap}
+                    size={16}
+                    color={COLORS.textPrimary}
+                  />
+                </View>
+                <Text style={styles.resultValue} numberOfLines={1}>
+                  {result.category}
+                </Text>
+              </View>
+            </ResultRow>
 
-            <View style={componentStyles.resultItem}>
-              <Text style={componentStyles.resultLabel}>Date</Text>
-              <Text style={componentStyles.resultValue}>{result.date}</Text>
-            </View>
+            <ResultRow label="Date">
+              <Text style={styles.resultValue}>{result.date}</Text>
+            </ResultRow>
 
-            <View style={[componentStyles.resultItem, componentStyles.resultTotal]}>
-              <Text style={componentStyles.resultLabel}>Total (₪)</Text>
+            <ResultRow label="Total (₪)" last>
               <TextInput
-                style={componentStyles.resultTotalInput}
+                testID="scan-total-input"
+                style={[styles.resultInput, styles.totalInput]}
                 value={editedTotal}
                 onChangeText={setEditedTotal}
                 keyboardType="numeric"
-                editable={!confirming && !discarding}
+                editable={!busy}
               />
-            </View>
-
-            {/* Buttons */}
-            <View style={componentStyles.resultButtons}>
-              <TouchableOpacity
-                style={componentStyles.cancelButton}
-                onPress={handleCancel}
-                disabled={confirming || discarding}
-              >
-                {discarding ? (
-                  <ActivityIndicator color={COLORS.textPrimary} />
-                ) : (
-                  <Text style={componentStyles.cancelButtonText}>Cancel</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={componentStyles.confirmButton}
-                onPress={handleConfirm}
-                disabled={confirming || discarding}
-              >
-                {confirming ? (
-                  <ActivityIndicator color={COLORS.buttonText} />
-                ) : (
-                  <Text style={componentStyles.confirmButtonText}>Confirm</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            </ResultRow>
           </View>
+
+          <TouchableOpacity
+            style={[styles.saveButton, busy && styles.saveButtonDisabled]}
+            onPress={handleConfirm}
+            disabled={busy}
+            accessibilityRole="button"
+            testID="scan-save-button"
+          >
+            {confirming ? (
+              <ActivityIndicator color={COLORS.buttonText} />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Receipt</Text>
+            )}
+          </TouchableOpacity>
         </Animated.View>
       )}
     </SafeAreaView>
   );
 }
 
-const componentStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.darkBg,
+    backgroundColor: COLORS.scannerBg,
   },
-  cameraViewfinder: {
-    flex: 1,
-    backgroundColor: COLORS.darkBg,
-    justifyContent: 'center',
+  // Top bar
+  topBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    overflow: 'hidden',
+    paddingHorizontal: SPACING.screenPadding,
+    paddingVertical: 12,
+    backgroundColor: COLORS.scannerBg,
+  },
+  topBarSide: {
+    width: 64,
+  },
+  topBarSideRight: {
+    alignItems: 'flex-end',
+  },
+  topBarTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: FONT_FAMILY,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.buttonText,
+  },
+  cancelText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '400',
+    color: COLORS.scannerCancel,
+  },
+  cancelTextDisabled: {
+    opacity: 0.5,
+  },
+  // Viewfinder
+  viewfinder: {
+    flex: 1,
+    backgroundColor: COLORS.scannerBg,
+    paddingHorizontal: 32,
+    paddingTop: 24,
+    paddingBottom: 20,
+  },
+  frame: {
+    flex: 1,
     position: 'relative',
+    overflow: 'hidden',
   },
   cornerGuide: {
-    width: 30,
-    height: 30,
     position: 'absolute',
+    width: CORNER_SIZE,
+    height: CORNER_SIZE,
+    borderColor: COLORS.scannerCorner,
+  },
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: CORNER_WIDTH,
+    borderLeftWidth: CORNER_WIDTH,
+  },
+  topRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: CORNER_WIDTH,
+    borderRightWidth: CORNER_WIDTH,
+  },
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: CORNER_WIDTH,
+    borderLeftWidth: CORNER_WIDTH,
+  },
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: CORNER_WIDTH,
+    borderRightWidth: CORNER_WIDTH,
   },
   scanLine: {
     position: 'absolute',
-    width: screenWidth - 40,
-    height: 2,
-    backgroundColor: COLORS.scanLineGreen,
-    left: 20,
-    shadowColor: COLORS.scanLineGreen,
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 5,
+    top: 0,
+    left: 8,
+    right: 8,
+    height: SCAN_LINE_HEIGHT,
+    borderRadius: 1,
+    backgroundColor: COLORS.scannerScanLine,
   },
-  instructionOverlay: {
-    position: 'absolute',
-    bottom: 80,
-    alignSelf: 'center',
+  hintText: {
+    marginTop: 16,
+    textAlign: 'center',
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: '400',
+    color: COLORS.scannerHint,
   },
-  instructionText: {
-    color: COLORS.surface,
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  // Controls
   controls: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingHorizontal: 40,
+    paddingTop: 20,
+    paddingBottom: 28,
     backgroundColor: COLORS.darkBg,
   },
   controlButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.surface,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.scannerControlBg,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  controlSpacer: {
+    width: 42,
+    height: 42,
   },
   captureButton: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: COLORS.button,
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.controlBorderOpacity,
   },
-  captureButtonInner: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.surface,
-  },
+  // Result card
   resultCard: {
     position: 'absolute',
     bottom: 0,
@@ -516,106 +562,112 @@ const componentStyles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 16,
-    maxHeight: 300,
+    paddingHorizontal: SPACING.screenPadding,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
-  resultContent: {
-    gap: 12,
+  dragPill: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    marginBottom: 14,
   },
   resultHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 6,
+    marginBottom: 4,
   },
   resultTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    flex: 1,
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: '600',
     color: COLORS.textPrimary,
   },
-  resultItem: {
+  resultRows: {
+    marginBottom: SPACING.sectionMargin + 4,
+  },
+  resultRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
+    alignItems: 'center',
+    minHeight: 48,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.border,
   },
-  resultTotal: {
+  resultRowLast: {
     borderBottomWidth: 0,
-    paddingVertical: 12,
-    backgroundColor: COLORS.successBg,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginVertical: 4,
   },
   resultLabel: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
+    width: 92,
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
     fontWeight: '500',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  resultValueContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
   },
   resultValue: {
+    fontFamily: FONT_FAMILY,
     fontSize: 14,
-    color: COLORS.textPrimary,
     fontWeight: '600',
+    color: COLORS.textPrimary,
+    textAlign: 'right',
+    flexShrink: 1,
   },
   resultInput: {
+    // textAlign/writingDirection for the merchant are applied dynamically via
+    // textDirectionStyle() based on the name's actual script (Hebrew vs. Latin).
+    alignSelf: 'stretch',
+    height: 34,
+    paddingHorizontal: 10,
+    paddingVertical: 0,
+    borderRadius: RADIUS.input,
+    backgroundColor: COLORS.background,
+    fontFamily: FONT_FAMILY,
     fontSize: 14,
-    color: COLORS.textPrimary,
     fontWeight: '600',
-    // textAlign/writingDirection applied dynamically via textDirectionStyle()
-    // based on the merchant name's actual script (Hebrew vs. Latin).
-    flex: 1,
-    marginLeft: 12,
-    padding: 0,
+    color: COLORS.textPrimary,
   },
-  resultTotalValue: {
-    fontSize: 18,
-    color: COLORS.success,
-    fontWeight: '700',
-  },
-  resultTotalInput: {
-    fontSize: 18,
-    color: COLORS.success,
+  totalInput: {
+    fontSize: 17,
     fontWeight: '700',
     textAlign: 'right',
-    flex: 1,
-    marginLeft: 12,
-    padding: 0,
   },
-  resultButtons: {
+  categoryValue: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
   },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  categoryIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: RADIUS.categoryIcon,
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  confirmButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+  saveButton: {
+    height: 50,
+    borderRadius: RADIUS.button,
     backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  confirmButtonText: {
-    fontSize: 14,
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 15,
     fontWeight: '600',
-    color: COLORS.surface,
+    color: COLORS.buttonText,
   },
 });

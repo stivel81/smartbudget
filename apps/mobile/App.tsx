@@ -56,6 +56,8 @@ function BottomTabNavigator() {
         component={ScanScreen}
         options={{
           title: 'Scan Receipt',
+          // ScanScreen draws its own dark top bar (title + Cancel) per the V2 spec.
+          headerShown: false,
           tabBarLabel: 'Scan',
           tabBarIcon: ({ color, size }) => (
             <Feather name="camera" size={size} color={color} />
