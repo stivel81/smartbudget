@@ -18,7 +18,7 @@ import { setStatusBarStyle } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
-import { AuthContext } from '../App';
+import { AuthContext } from '../lib/auth';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 import {

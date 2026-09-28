@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { AuthContext } from '../App';
+import { AuthContext } from '../lib/auth';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 import { initialsFromEmail } from '../lib/profile';
 import { errorMessage } from '../lib/errors';

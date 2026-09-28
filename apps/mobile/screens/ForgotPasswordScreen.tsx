@@ -23,7 +23,7 @@ import {
   validateResetCode,
 } from '../lib/validation';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
-import { AuthContext } from '../App';
+import { AuthContext } from '../lib/auth';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
 type RootStackParamList = {

@@ -70,7 +70,7 @@ jest.mock('expo-image-manipulator', () => ({
 }));
 
 import ScanScreen from '../../screens/ScanScreen';
-import { AuthContext, AuthContextType } from '../../App';
+import { AuthContext, AuthContextType } from '../../lib/auth';
 
 const picker = ImagePicker as jest.Mocked<typeof ImagePicker>;
 const manipulate = ImageManipulator.manipulate as jest.Mock;

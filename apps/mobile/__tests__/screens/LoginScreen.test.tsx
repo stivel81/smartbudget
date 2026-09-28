@@ -8,7 +8,7 @@ jest.mock('../../lib/api', () => ({
 }));
 
 import LoginScreen from '../../screens/LoginScreen';
-import { AuthContext, AuthContextType } from '../../App';
+import { AuthContext, AuthContextType } from '../../lib/auth';
 import { COLORS } from '../../lib/theme';
 
 function renderLogin(overrides: Partial<AuthContextType> = {}) {

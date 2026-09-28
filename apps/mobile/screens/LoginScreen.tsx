@@ -15,7 +15,7 @@ import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { login } from '../lib/api';
 import { isValidEmail } from '../lib/validation';
-import { AuthContext } from '../App';
+import { AuthContext } from '../lib/auth';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
 type RootStackParamList = {

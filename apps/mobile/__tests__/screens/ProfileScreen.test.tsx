@@ -14,7 +14,7 @@ jest.mock('@expo/vector-icons', () => {
 });
 
 import ProfileScreen from '../../screens/ProfileScreen';
-import { AuthContext, AuthContextType } from '../../App';
+import { AuthContext, AuthContextType } from '../../lib/auth';
 
 function renderProfile(overrides: Partial<AuthContextType> = {}) {
   const value: AuthContextType = {

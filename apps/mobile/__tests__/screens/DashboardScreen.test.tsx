@@ -25,7 +25,7 @@ jest.mock('../../lib/api', () => ({
 }));
 
 import DashboardScreen from '../../screens/DashboardScreen';
-import { AuthContext } from '../../App';
+import { AuthContext } from '../../lib/auth';
 
 // Pin "now" to Thursday 22 Jan 2026, 09:00 local, so month/week filtering
 // and the greeting don't depend on when the suite runs.

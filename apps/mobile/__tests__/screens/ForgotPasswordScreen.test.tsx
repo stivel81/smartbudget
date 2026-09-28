@@ -23,7 +23,7 @@ jest.mock('../../lib/api', () => ({
 }));
 
 import ForgotPasswordScreen, { RESEND_COOLDOWN_SECONDS } from '../../screens/ForgotPasswordScreen';
-import { AuthContext, AuthContextType } from '../../App';
+import { AuthContext, AuthContextType } from '../../lib/auth';
 import { COLORS } from '../../lib/theme';
 
 const SESSION = {

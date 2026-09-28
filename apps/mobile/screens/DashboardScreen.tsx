@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { AuthContext } from '../App';
+import { AuthContext } from '../lib/auth';
 import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';

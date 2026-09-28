@@ -24,7 +24,7 @@ jest.mock('../../lib/api', () => ({
 }));
 
 import BudgetScreen from '../../screens/BudgetScreen';
-import { AuthContext } from '../../App';
+import { AuthContext } from '../../lib/auth';
 import { COLORS } from '../../lib/theme';
 
 // Pin "now" to mid-January 2026 (local time) so month filtering doesn't

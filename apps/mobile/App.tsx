@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { logout as logoutApi, refreshSession as refreshSessionApi } from './lib/api';
 import { COLORS } from './lib/theme';
+import { AuthContext } from './lib/auth';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -90,30 +91,6 @@ function BottomTabNavigator() {
     </Tab.Navigator>
   );
 }
-
-export interface AuthContextType {
-  isAuthenticated: boolean;
-  setIsAuthenticated: (value: boolean) => void;
-  accessToken: string | null;
-  setAccessToken: (token: string | null) => void;
-  refreshToken: string | null;
-  setRefreshToken: (token: string | null) => void;
-  userEmail: string | null;
-  setUserEmail: (email: string | null) => void;
-  logout: () => Promise<void>;
-}
-
-export const AuthContext = React.createContext<AuthContextType>({
-  isAuthenticated: false,
-  setIsAuthenticated: () => {},
-  accessToken: null,
-  setAccessToken: () => {},
-  refreshToken: null,
-  setRefreshToken: () => {},
-  userEmail: null,
-  setUserEmail: () => {},
-  logout: async () => {},
-});
 
 // Mobile never talks to Supabase directly — access tokens are exchanged
 // for a new session via POST /api/v1/auth/refresh (see lib/api.ts). Only
