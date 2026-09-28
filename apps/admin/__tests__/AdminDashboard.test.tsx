@@ -37,6 +37,7 @@ jest.mock('../app/views/RateLimitViolationsView', () => ({
   __esModule: true,
   default: () => <div>RateLimitViolationsView</div>,
 }));
+jest.mock('../app/views/SettingsView', () => ({ __esModule: true, default: () => <div>SettingsView</div> }));
 
 function renderDashboard(onSignOut = jest.fn()) {
   render(<AdminDashboard accessToken="tok" userEmail="admin@example.com" onSignOut={onSignOut} />);
@@ -60,6 +61,7 @@ describe('AdminDashboard navigation', () => {
     ['AI Monitor', 'AIMonitorView'],
     ['Audit log', 'AuditLogView'],
     ['Rate limits', 'RateLimitViolationsView'],
+    ['Settings', 'SettingsView'],
   ])('navigates to %s', async (label, text) => {
     renderDashboard();
     await userEvent.click(screen.getByRole('button', { name: label }));

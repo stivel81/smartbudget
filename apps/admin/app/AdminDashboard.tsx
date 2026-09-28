@@ -8,6 +8,7 @@ import UserDetailView from './views/UserDetailView';
 import AIMonitorView from './views/AIMonitorView';
 import AuditLogView from './views/AuditLogView';
 import RateLimitViolationsView from './views/RateLimitViolationsView';
+import SettingsView from './views/SettingsView';
 import { getFailedScans } from '../lib/api';
 
 type View =
@@ -80,12 +81,7 @@ export default function AdminDashboard({
 
       {view.name === 'rateLimits' && <RateLimitViolationsView accessToken={accessToken} />}
 
-      {view.name === 'settings' && (
-        <div>
-          <h1 style={{ fontFamily: 'inherit', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Settings</h1>
-          <p style={{ fontSize: 13, color: '#6b7280' }}>Coming soon.</p>
-        </div>
-      )}
+      {view.name === 'settings' && <SettingsView />}
     </AdminLayout>
   );
 }
