@@ -80,10 +80,29 @@
 - Full width
 
 ### Category icon
-- Size: 30–34px square
-- Background: #f2f2f7
-- Icon color: #000000
-- Border radius: 8–10px
+**Decision (Sept 2026): colored variant.** After reviewing the build in the
+Simulator, the product owner chose to keep per-category colored icons instead
+of the original monochrome spec, because color makes categories easier to tell
+apart at a glance in the Dashboard grid, Recent list and Budget cards. This is
+a deliberate deviation from "black as the only accent color".
+- Background: a light tint per category; icon glyph in the matching darker
+  shade. Source of truth: `CATEGORY_META` in `apps/mobile/lib/theme.ts`
+  (keep in sync with `RECEIPT_CATEGORIES` in the backend)
+
+  | Category | Icon (MaterialCommunityIcons) | Background | Icon color |
+  |---|---|---|---|
+  | Groceries | cart | #E1F5EE | #0F6E56 |
+  | Dining | silverware-fork-knife | #FEF3C7 | #D97706 |
+  | Transport | bus | #EEF2FF | #4F46E5 |
+  | Entertainment | television | #FEE2E2 | #DC2626 |
+  | Health | heart | #F0FDF4 | #16A34A |
+  | Other | dots-horizontal | #F3F4F6 | #6B7280 |
+- Shape/size as implemented: circle on Dashboard category cards (44px),
+  rounded square (radius 8px) in Recent receipts and Budget cards (40px)
+- The Scan result card's small category icon stays monochrome (#f2f2f7 bg,
+  black glyph), as do Profile menu icons
+- ~~Original spec: 30–34px square, #f2f2f7 background, #000000 icon,
+  radius 8–10px~~ — superseded by the colored variant above
 
 ### Budget progress bar
 - Height: 4px
@@ -155,7 +174,8 @@ Layout (top to bottom):
     - This week amount | Receipt count | Budget % used
 - Categories section (2-column grid):
   - Each card: white bg, radius 14px
-  - Icon (30px, #f2f2f7 bg) + name + amount + progress bar
+  - Icon (colored per category — see Category icon) + name + amount + progress bar
+  - Every card is half width (2 columns) — an odd last card does not stretch
 - Recent section:
   - White card, radius 14px
   - Each row: icon + merchant + date | amount (right)
