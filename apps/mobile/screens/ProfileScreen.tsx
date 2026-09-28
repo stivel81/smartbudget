@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
   userCard: {
     alignItems: 'center',
     paddingVertical: 24,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     marginBottom: 24,
     borderWidth: 1,
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   menuSection: {
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,

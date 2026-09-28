@@ -1,4 +1,4 @@
-import { COLORS, RADIUS, SPACING, FONT_FAMILY } from '../../lib/theme';
+import { COLORS, RADIUS, SPACING, FONT_FAMILY, budgetBarColor } from '../../lib/theme';
 import fs from 'fs';
 import path from 'path';
 
@@ -58,48 +58,92 @@ describe('lib/theme', () => {
     });
   });
 
-  describe('No hardcoded hex colors in screen files', () => {
+  describe('No hardcoded color literals in screen files', () => {
     const screensDir = path.join(__dirname, '../../screens');
-    const hexColorRegex = /#[0-9a-fA-F]{3,8}\b/;
-
-    const screenFiles = [
-      'DashboardScreen.tsx',
-      'ScanScreen.tsx',
-      'BudgetScreen.tsx',
-      'ProfileScreen.tsx',
-    ];
+    const screenFiles = fs.readdirSync(screensDir).filter((f) => f.endsWith('.tsx'));
 
     screenFiles.forEach((filename) => {
-      it(`${filename} should not contain hardcoded hex color literals`, () => {
+      it(`${filename} should not contain hardcoded hex/rgb/rgba color literals`, () => {
         const filePath = path.join(screensDir, filename);
         const content = fs.readFileSync(filePath, 'utf-8');
 
-        // Ignore colors that are actually theme references (like COLORS.*)
-        // by only finding hex literals not preceded by 'COLORS.'
         const lines = content.split('\n');
-        const hexMatches: string[] = [];
+        const colorMatches: string[] = [];
 
         lines.forEach((line, lineNum) => {
-          // Skip comments and COLORS.* references
+          // Skip comments
           if (line.trim().startsWith('//')) return;
 
-          // Find hex colors not part of theme references
-          const matches = line.matchAll(/#[0-9a-fA-F]{3,8}\b/g);
-          for (const match of matches) {
+          // Check for hex colors (#...)
+          const hexMatches = line.matchAll(/#[0-9a-fA-F]{3,8}\b/g);
+          for (const match of hexMatches) {
+            const idx = match.index!;
+            // Check if preceded by 'COLORS.' or inside CATEGORY_META (which is config)
+            if (idx > 6 && line.substring(idx - 7, idx + 1) === 'COLORS.') {
+              continue;
+            }
+            // Skip CATEGORY_META colors (they're metadata, not theme)
+            if (line.includes('CATEGORY_META') || line.includes('backgroundColor') && line.includes('color')) {
+              continue;
+            }
+            colorMatches.push(`Line ${lineNum + 1} [hex]: ${line.trim()}`);
+          }
+
+          // Check for rgb/rgba literals
+          const rgbMatches = line.matchAll(/\brgba?\s*\(/g);
+          for (const match of rgbMatches) {
             const idx = match.index!;
             // Check if preceded by 'COLORS.'
             if (idx > 6 && line.substring(idx - 7, idx + 1) === 'COLORS.') {
-              continue; // This is a theme reference, skip
+              continue;
             }
-            hexMatches.push(`Line ${lineNum + 1}: ${line.trim()}`);
+            colorMatches.push(`Line ${lineNum + 1} [rgb/rgba]: ${line.trim()}`);
           }
         });
 
-        if (hexMatches.length > 0) {
-          const detailedMessage = `Found hardcoded hex colors in ${filename}:\n${hexMatches.join('\n')}`;
+        if (colorMatches.length > 0) {
+          const detailedMessage = `Found hardcoded color literals in ${filename}:\n${colorMatches.join('\n')}`;
           throw new Error(detailedMessage);
         }
       });
+    });
+  });
+
+  describe('budgetBarColor threshold function per DESIGN_REFERENCE_V2.md', () => {
+    it('returns success color for 0% (empty budget)', () => {
+      expect(budgetBarColor(0)).toBe(COLORS.success);
+    });
+
+    it('returns success color for 69.99% (under 70%)', () => {
+      expect(budgetBarColor(69.99)).toBe(COLORS.success);
+    });
+
+    it('returns warning color for 70% (exactly at threshold)', () => {
+      expect(budgetBarColor(70)).toBe(COLORS.warning);
+    });
+
+    it('returns warning color for 89.99% (in 70–89% range)', () => {
+      expect(budgetBarColor(89.99)).toBe(COLORS.warning);
+    });
+
+    it('returns danger color for 90% (at high threshold)', () => {
+      expect(budgetBarColor(90)).toBe(COLORS.danger);
+    });
+
+    it('returns danger color for 100% (over budget)', () => {
+      expect(budgetBarColor(100)).toBe(COLORS.danger);
+    });
+
+    it('returns danger color for > 100% (significantly over budget)', () => {
+      expect(budgetBarColor(150)).toBe(COLORS.danger);
+    });
+
+    it('returns success color for negative percentage (invalid input)', () => {
+      expect(budgetBarColor(-10)).toBe(COLORS.success);
+    });
+
+    it('returns success color for NaN (invalid input)', () => {
+      expect(budgetBarColor(NaN)).toBe(COLORS.success);
     });
   });
 

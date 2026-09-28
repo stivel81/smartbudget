@@ -28,12 +28,16 @@ export const COLORS = {
   chipBg: '#fafafa',
   signOutBg: '#fee2e2',
   signOutBorder: '#fca5a5',
-  // Aliases for backward compatibility
-  card: '#ffffff',
-  primary: '#000000',
+  errorBg: '#fee2e2',
   // Additional UI element colors
   alertTextColor: '#92400e',
   successBg: '#f0fdf4',
+  // Opacity/overlay colors
+  overlay: 'rgba(0, 0, 0, 0.4)',
+  heroSubtextOpacity: 'rgba(255, 255, 255, 0.4)',
+  heroLabelOpacity: 'rgba(255, 255, 255, 0.8)',
+  controlBorderOpacity: 'rgba(255, 255, 255, 0.3)',
+  modalOverlay: 'rgba(0, 0, 0, 0.6)',
 };
 
 export const RADIUS = {
@@ -68,3 +72,20 @@ export const CATEGORY_META: Record<string, { icon: string; backgroundColor: stri
   Health: { icon: 'heart', backgroundColor: '#F0FDF4', color: '#16A34A' },
   Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
 };
+
+// Budget bar threshold logic per DESIGN_REFERENCE_V2.md Alert Thresholds:
+// Under 70% → green (success)
+// 70–89% → amber (warning)
+// 90%+ → red (danger)
+export function budgetBarColor(percentage: number): string {
+  if (Number.isNaN(percentage) || percentage < 0) {
+    return COLORS.success; // Default to safe state for invalid input
+  }
+  if (percentage >= 90) {
+    return COLORS.danger;
+  }
+  if (percentage >= 70) {
+    return COLORS.warning;
+  }
+  return COLORS.success;
+}

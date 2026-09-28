@@ -123,7 +123,7 @@ export default function SignupScreen({ navigation }: Props) {
           {/* Logo Area */}
           <View style={styles.logoContainer}>
             <View style={styles.logoIcon}>
-              <MaterialCommunityIcons name="wallet" size={26} color="#ffffff" />
+              <MaterialCommunityIcons name="wallet" size={26} color={COLORS.buttonText} />
             </View>
             <Text style={styles.title}>Create account</Text>
             <Text style={styles.subtitle}>Start tracking your budget</Text>
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   errorBanner: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: COLORS.errorBg,
     borderColor: COLORS.danger,
     borderWidth: 1,
     borderRadius: RADIUS.input,

@@ -15,7 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
-import { COLORS, CATEGORY_META } from '../lib/theme';
+import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -43,10 +43,7 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[] }> = ({ overBudget }
 const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ item, onPress }) => {
   const meta = categoryMeta(item.category);
   const percentage = (item.spent / item.monthly_limit) * 100;
-
-  let barColor = COLORS.success; // green, under 70%
-  if (percentage >= 90) barColor = COLORS.danger; // red
-  else if (percentage >= 70) barColor = COLORS.warning; // amber
+  const barColor = budgetBarColor(percentage);
 
   return (
     <TouchableOpacity style={styles.budgetItem} onPress={onPress}>
@@ -339,7 +336,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.border,
     justifyContent: 'center',
@@ -397,7 +394,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   budgetItem: {
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
@@ -452,7 +449,7 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     marginHorizontal: 16,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
@@ -480,11 +477,11 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: COLORS.overlay,
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,

@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   balanceLabel: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: COLORS.heroLabelOpacity,
     fontSize: 12,
     fontWeight: '500',
   },
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   categoryCard: {
     flex: 1,
     minWidth: '48%',
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 10,
     marginBottom: 8,
     borderWidth: 1,
@@ -462,12 +462,12 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: COLORS.modalOverlay,
     justifyContent: 'center',
     padding: 20,
   },
   modalCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     maxHeight: '80%',

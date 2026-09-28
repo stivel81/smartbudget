@@ -500,7 +500,7 @@ const componentStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: COLORS.controlBorderOpacity,
   },
   captureButtonInner: {
     width: 50,
