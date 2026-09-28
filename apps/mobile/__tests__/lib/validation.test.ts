@@ -1,11 +1,12 @@
 import {
   MIN_PASSWORD_LENGTH,
-  RESET_CODE_LENGTH,
+  OTP_CODE_LENGTH,
+  OTP_RESEND_COOLDOWN_SECONDS,
   isValidEmail,
   validateEmail,
   validateNewPassword,
-  sanitizeResetCode,
-  validateResetCode,
+  sanitizeOtpCode,
+  validateOtpCode,
   calculatePasswordStrength,
   validatePasswordChange,
   SAME_PASSWORD_MESSAGE,
@@ -14,7 +15,7 @@ import {
 describe('lib/validation', () => {
   it('matches the backend rules (8-char passwords, 6-digit codes)', () => {
     expect(MIN_PASSWORD_LENGTH).toBe(8);
-    expect(RESET_CODE_LENGTH).toBe(6);
+    expect(OTP_CODE_LENGTH).toBe(6);
   });
 
   describe('isValidEmail', () => {
@@ -55,7 +56,7 @@ describe('lib/validation', () => {
     });
   });
 
-  describe('sanitizeResetCode', () => {
+  describe('sanitizeOtpCode', () => {
     it.each([
       ['123456', '123456'],
       ['12 34 56', '123456'],
@@ -63,22 +64,32 @@ describe('lib/validation', () => {
       ['1234567890', '123456'],
       ['abc', ''],
       ['', ''],
+      ['１２３４５６', ''], // full-width digits are not accepted by the backend either
+      ['٣٤٥', ''], // Arabic-Indic digits
+      ['Your code is 482913.', '482913'], // pasted from the email
+      [' 048 291 ', '048291'], // keeps leading zeros
     ])('%p -> %p', (input, expected) => {
-      expect(sanitizeResetCode(input)).toBe(expected);
+      expect(sanitizeOtpCode(input)).toBe(expected);
     });
   });
 
-  describe('validateResetCode', () => {
+  describe('validateOtpCode', () => {
     it('requires a code', () => {
-      expect(validateResetCode('')).toBe('Code is required');
+      expect(validateOtpCode('')).toBe('Code is required');
     });
 
-    it.each(['12345', '1234567', '12a456', 'abcdef'])('rejects %p', (code) => {
-      expect(validateResetCode(code)).toBe('Enter the 6-digit code from your email');
+    it.each(['12345', '1234567', '12a456', 'abcdef', ' 12345', '１２３４５６'])('rejects %p', (code) => {
+      expect(validateOtpCode(code)).toBe('Enter the 6-digit code from your email');
     });
 
     it('accepts six digits, including leading zeros', () => {
-      expect(validateResetCode('012345')).toBeNull();
+      expect(validateOtpCode('012345')).toBeNull();
+    });
+  });
+
+  describe('OTP constants', () => {
+    it("resend cooldown matches Supabase's 60s per-user email window", () => {
+      expect(OTP_RESEND_COOLDOWN_SECONDS).toBe(60);
     });
   });
 

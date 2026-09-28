@@ -16,13 +16,14 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { requestPasswordReset, resetPassword } from '../lib/api';
 import { apiErrorMessage } from '../lib/errors';
 import {
-  RESET_CODE_LENGTH,
-  sanitizeResetCode,
+  OTP_CODE_LENGTH,
+  OTP_RESEND_COOLDOWN_SECONDS,
   validateEmail,
   validateNewPassword,
-  validateResetCode,
+  validateOtpCode,
 } from '../lib/validation';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import OtpCodeInput from '../components/OtpCodeInput';
 import { AuthContext } from '../lib/auth';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
@@ -37,10 +38,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ForgotPassword'>;
 
 type Step = 'email' | 'reset';
 
-// Supabase only sends one recovery email per user per 60s by default, and
-// the backend deliberately hides Supabase errors (anti-enumeration) — so a
-// faster resend would *look* successful but send nothing. Match the window.
-export const RESEND_COOLDOWN_SECONDS = 60;
+// Matches Supabase's one-email-per-60s limit (see OTP_RESEND_COOLDOWN_SECONDS).
+export const RESEND_COOLDOWN_SECONDS = OTP_RESEND_COOLDOWN_SECONDS;
 
 const SEND_NETWORK_ERROR = 'Could not send the code. Check your connection and try again.';
 const RESET_NETWORK_ERROR = 'Could not reset your password. Check your connection and try again.';
@@ -86,7 +85,7 @@ export default function ForgotPasswordScreen({ navigation, route }: Props) {
       setStep('reset');
       setCooldown(RESEND_COOLDOWN_SECONDS);
       setNotice(
-        `If an account exists for ${trimmed}, we've sent a ${RESET_CODE_LENGTH}-digit code to it.`
+        `If an account exists for ${trimmed}, we've sent a ${OTP_CODE_LENGTH}-digit code to it.`
       );
     } catch (err) {
       setError(apiErrorMessage(err, SEND_NETWORK_ERROR));
@@ -115,7 +114,7 @@ export default function ForgotPasswordScreen({ navigation, route }: Props) {
     setError('');
     setNotice('');
 
-    const codeError = validateResetCode(code);
+    const codeError = validateOtpCode(code);
     if (codeError) {
       setError(codeError);
       return;
@@ -173,7 +172,7 @@ export default function ForgotPasswordScreen({ navigation, route }: Props) {
             </Text>
             <Text style={styles.subtitle}>
               {step === 'email'
-                ? `We'll email you a ${RESET_CODE_LENGTH}-digit code`
+                ? `We'll email you a ${OTP_CODE_LENGTH}-digit code`
                 : 'Enter the code and choose a new password'}
             </Text>
           </View>
@@ -235,16 +234,9 @@ export default function ForgotPasswordScreen({ navigation, route }: Props) {
               </View>
 
               <View style={styles.formGroup}>
-                <TextInput
-                  style={[styles.input, styles.codeInput]}
-                  placeholder={`${RESET_CODE_LENGTH}-digit code`}
-                  placeholderTextColor={COLORS.placeholder}
+                <OtpCodeInput
                   value={code}
-                  onChangeText={(text) => setCode(sanitizeResetCode(text))}
-                  keyboardType="number-pad"
-                  textContentType="oneTimeCode"
-                  autoComplete="one-time-code"
-                  maxLength={RESET_CODE_LENGTH}
+                  onChangeCode={setCode}
                   editable={!loading}
                   testID="forgot-code-input"
                 />
@@ -426,11 +418,6 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 15,
     fontWeight: '400',
-  },
-  codeInput: {
-    letterSpacing: 6,
-    fontSize: 18,
-    fontWeight: '600',
   },
   passwordContainer: {
     flexDirection: 'row',

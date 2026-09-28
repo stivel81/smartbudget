@@ -1,10 +1,18 @@
-// Pure auth-form validation shared by Login, Signup, ForgotPassword and Settings.
+// Pure auth-form validation shared by Login, Signup, ForgotPassword, VerifyEmail and Settings.
 // Each validate* returns the user-facing error message, or null when valid.
 // Rules mirror the backend (apps/backend/src/routes/auth.ts), which remains
 // the source of truth — these exist to fail fast with a friendly message.
 
 export const MIN_PASSWORD_LENGTH = 8;
-export const RESET_CODE_LENGTH = 6;
+/** Emailed one-time codes (password reset, signup confirmation) are 6 digits. */
+export const OTP_CODE_LENGTH = 6;
+
+/**
+ * Supabase sends at most one auth email per user per 60s by default, and the
+ * backend deliberately hides Supabase errors (anti-enumeration) — so a faster
+ * "Resend code" would *look* successful but send nothing. Match the window.
+ */
+export const OTP_RESEND_COOLDOWN_SECONDS = 60;
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -43,15 +51,15 @@ export function validatePasswordChange(currentPassword: string, newPassword: str
   return null;
 }
 
-/** Keep only digits, capped at the code length — for the code input's onChangeText. */
-export function sanitizeResetCode(text: string): string {
-  return text.replace(/\D/g, '').slice(0, RESET_CODE_LENGTH);
+/** Keep only ASCII digits, capped at the code length — for a code input's onChangeText. */
+export function sanitizeOtpCode(text: string): string {
+  return text.replace(/[^0-9]/g, '').slice(0, OTP_CODE_LENGTH);
 }
 
-export function validateResetCode(code: string): string | null {
+export function validateOtpCode(code: string): string | null {
   if (!code) return 'Code is required';
-  if (!new RegExp(`^\\d{${RESET_CODE_LENGTH}}$`).test(code)) {
-    return `Enter the ${RESET_CODE_LENGTH}-digit code from your email`;
+  if (!new RegExp(`^[0-9]{${OTP_CODE_LENGTH}}$`).test(code)) {
+    return `Enter the ${OTP_CODE_LENGTH}-digit code from your email`;
   }
   return null;
 }

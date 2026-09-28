@@ -218,6 +218,32 @@ describe('ForgotPasswordScreen', () => {
       expect(screen.getByTestId('forgot-code-input').props.value).toBe('123456');
     });
 
+    it('does not stretch the placeholder: letter spacing only once a digit is typed', async () => {
+      renderForgot();
+      await goToResetStep();
+
+      const empty = StyleSheet.flatten(screen.getByTestId('forgot-code-input').props.style);
+      expect(screen.getByTestId('forgot-code-input').props.placeholder).toBe('6-digit code');
+      expect(empty.letterSpacing).toBeUndefined();
+
+      fireEvent.changeText(screen.getByTestId('forgot-code-input'), '12');
+      const filled = StyleSheet.flatten(screen.getByTestId('forgot-code-input').props.style);
+      expect(filled.letterSpacing).toBe(6);
+
+      fireEvent.changeText(screen.getByTestId('forgot-code-input'), '');
+      const cleared = StyleSheet.flatten(screen.getByTestId('forgot-code-input').props.style);
+      expect(cleared.letterSpacing).toBeUndefined();
+    });
+
+    it('offers one-time-code autofill on the code field', async () => {
+      renderForgot();
+      await goToResetStep();
+
+      const codeInput = screen.getByTestId('forgot-code-input');
+      expect(codeInput.props.textContentType).toBe('oneTimeCode');
+      expect(codeInput.props.autoComplete).toBe('one-time-code');
+    });
+
     it('requires the code', async () => {
       renderForgot();
       await goToResetStep();
