@@ -82,6 +82,60 @@ describe('ProfileScreen', () => {
     expect(screen.getByTestId('profile-email').props.children).toBe('');
   });
 
+  describe('with a display name', () => {
+    it('shows the name as the title and the email underneath (no "Signed in")', () => {
+      renderProfile({ userName: 'Adrian Schtivelmager', userEmail: 'stivel@gmail.com' });
+
+      expect(screen.getByTestId('profile-name').props.children).toBe('Adrian Schtivelmager');
+      expect(screen.getByTestId('profile-email').props.children).toBe('stivel@gmail.com');
+      expect(screen.queryByText('Signed in')).toBeNull();
+    });
+
+    it('styles the name as the bold title and the email as the grey subtitle', () => {
+      renderProfile({ userName: 'Adrian Schtivelmager', userEmail: 'stivel@gmail.com' });
+
+      const title = StyleSheet.flatten(screen.getByTestId('profile-name').props.style);
+      const subtitle = StyleSheet.flatten(screen.getByTestId('profile-email').props.style);
+      expect(title.color).toBe(COLORS.textPrimary);
+      expect(title.fontWeight).toBe('600');
+      expect(subtitle.color).toBe(COLORS.textSecondary);
+      expect(Number(title.fontSize)).toBeGreaterThan(Number(subtitle.fontSize));
+    });
+
+    it('uses name initials ("AS"), not email initials ("ST")', () => {
+      renderProfile({ userName: 'Adrian Schtivelmager', userEmail: 'stivel@gmail.com' });
+
+      expect(screen.getByTestId('profile-avatar')).toHaveTextContent('AS');
+      expect(screen.queryByText('ST')).toBeNull();
+    });
+
+    it('handles a Hebrew name', () => {
+      renderProfile({ userName: 'אדריאן שטיבלמגר', userEmail: 'stivel@gmail.com' });
+
+      expect(screen.getByTestId('profile-name').props.children).toBe('אדריאן שטיבלמגר');
+      expect(screen.getByTestId('profile-avatar')).toHaveTextContent('אש');
+    });
+
+    it('trims the name', () => {
+      renderProfile({ userName: '  Ada Lovelace  ', userEmail: 'ada@example.com' });
+
+      expect(screen.getByTestId('profile-name').props.children).toBe('Ada Lovelace');
+    });
+  });
+
+  describe('email-only accounts', () => {
+    it.each([null, '', '   '])('userName %p: email is the title with "Signed in" under it', (userName) => {
+      renderProfile({ userName, userEmail: 'stivel@gmail.com' });
+
+      expect(screen.queryByTestId('profile-name')).toBeNull();
+      expect(screen.getByTestId('profile-email').props.children).toBe('stivel@gmail.com');
+      const title = StyleSheet.flatten(screen.getByTestId('profile-email').props.style);
+      expect(title.color).toBe(COLORS.textPrimary);
+      expect(screen.getByText('Signed in')).toBeTruthy();
+      expect(screen.getByTestId('profile-avatar')).toHaveTextContent('ST');
+    });
+  });
+
   it('lists exactly the Settings, Privacy Policy and Help & Support rows', () => {
     renderProfile();
     expect(screen.getByText('General')).toBeTruthy();

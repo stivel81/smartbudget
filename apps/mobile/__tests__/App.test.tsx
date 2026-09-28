@@ -1,4 +1,5 @@
 import React from 'react';
+import { Animated } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import App from '../App';
@@ -297,6 +298,8 @@ describe('App signup email verification (real navigator)', () => {
     await waitFor(() => expect(screen.getByText('My Finances')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
     expect(screen.queryByTestId('verify-screen')).toBeNull();
+    expect(screen.getByTestId('dashboard-greeting')).toHaveTextContent(/^Good (morning|afternoon|evening), Adrian$/);
+    expect(screen.getByTestId('dashboard-avatar')).toHaveTextContent('AS');
 
     const [, verifyInit] = fetchCalls('/auth/verify-signup')[0];
     expect(JSON.parse(verifyInit.body)).toEqual({ email: 'adrian@example.com', code: '123456' });
@@ -343,6 +346,7 @@ describe('App signup email verification (real navigator)', () => {
     fireEvent.press(screen.getByTestId('verify-button'));
 
     await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.getByTestId('dashboard-greeting')).toHaveTextContent(/, Adrian$/);
     const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
     expect(navErrors).toEqual([]);
     errorSpy.mockRestore();
@@ -392,5 +396,144 @@ describe('App signup email verification (real navigator)', () => {
     await waitFor(() => expect(screen.queryByTestId('verify-screen')).toBeNull());
     expect(screen.getByTestId('login-email-input')).toBeTruthy();
     expect(screen.queryByTestId('signup-screen')).toBeNull();
+  });
+});
+
+describe("App user's display name", () => {
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  function refreshWith(user: Record<string, unknown>) {
+    mockFetch({
+      '/api/v1/auth/refresh': () => okJson({ session: { access_token: 'acc', refresh_token: 'ref', user } }),
+      '/api/v1/auth/logout': () => okJson({ message: 'Signed out successfully' }),
+      '/api/v1/receipts': () => okJson({ receipts: [] }),
+      '/api/v1/budgets': () => okJson({ budgets: [] }),
+    });
+  }
+
+  it('uses the name from the refreshed session on launch (greeting, avatar, Profile card)', async () => {
+    refreshWith({ id: 'u1', email: 'stivel@gmail.com', name: 'Adrian Schtivelmager' });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.getByTestId('dashboard-greeting')).toHaveTextContent(/, Adrian$/);
+    expect(screen.getByTestId('dashboard-avatar')).toHaveTextContent('AS');
+
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-name')).toBeTruthy());
+    expect(screen.getByTestId('profile-name')).toHaveTextContent('Adrian Schtivelmager');
+    expect(screen.getByTestId('profile-email')).toHaveTextContent('stivel@gmail.com');
+    expect(screen.getByTestId('profile-avatar')).toHaveTextContent('AS');
+  });
+
+  it('falls back to the persisted name when the backend sends none', async () => {
+    refreshWith({ id: 'u1', email: 'stivel@gmail.com' });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+    await AsyncStorage.setItem('@smartbudget/userName', 'Adrian Schtivelmager');
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.getByTestId('dashboard-greeting')).toHaveTextContent(/, Adrian$/);
+  });
+
+  it('email-only account: no name in the greeting and email initials', async () => {
+    refreshWith({ id: 'u1', email: 'stivel@gmail.com', name: null });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.getByTestId('dashboard-greeting')).toHaveTextContent(/^Good (morning|afternoon|evening)$/);
+    expect(screen.getByTestId('dashboard-avatar')).toHaveTextContent('ST');
+    expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull();
+  });
+
+  it('clears the stored name on sign out', async () => {
+    refreshWith({ id: 'u1', email: 'stivel@gmail.com', name: 'Adrian Schtivelmager' });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem('@smartbudget/userName')).toBe('Adrian Schtivelmager')
+    );
+
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull());
+  });
+
+  it('clears a stored name when the stored refresh token is invalid', async () => {
+    mockFetch({ '/api/v1/auth/refresh': () => errJson(401, { error: 'Invalid or expired refresh token' }) });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stale');
+    await AsyncStorage.setItem('@smartbudget/userName', 'Adrian Schtivelmager');
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull();
+  });
+});
+
+describe('App first-run Dashboard shortcuts (real navigator)', () => {
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  async function signIn() {
+    mockFetch({
+      '/api/v1/auth/refresh': () =>
+        okJson({ session: { access_token: 'acc', refresh_token: 'ref', user: { id: 'u1', email: 'a@b.com' } } }),
+      '/api/v1/receipts': () => okJson({ receipts: [] }),
+      '/api/v1/budgets': () => okJson({ budgets: [] }),
+    });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+  }
+
+  it('"Scan your first receipt" opens the Scan tab', async () => {
+    // The Scan tab's scan-line animation would keep updating after the test
+    // (act() noise); it's covered in ScanScreen.test — stub the loop here.
+    const loopSpy = jest
+      .spyOn(Animated, 'loop')
+      .mockReturnValue({ start: jest.fn(), stop: jest.fn(), reset: jest.fn() } as unknown as Animated.CompositeAnimation);
+    const errorSpy = jest.spyOn(console, 'error');
+    await signIn();
+
+    expect(screen.queryByTestId('scan-frame')).toBeNull(); // tabs mount lazily
+    fireEvent.press(screen.getByTestId('dashboard-scan-first'));
+
+    await waitFor(() => expect(screen.getByTestId('scan-frame')).toBeTruthy());
+    const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
+    expect(navErrors).toEqual([]);
+    errorSpy.mockRestore();
+    loopSpy.mockRestore();
+  });
+
+  it('the "No budget" stat opens the Budget tab', async () => {
+    const errorSpy = jest.spyOn(console, 'error');
+    await signIn();
+    expect(screen.getByTestId('hero-budget-pct')).toHaveTextContent('—');
+
+    expect(screen.queryByTestId('budget-screen')).toBeNull(); // tabs mount lazily
+    fireEvent.press(screen.getByTestId('hero-budget-stat'));
+
+    await waitFor(() => expect(screen.getByTestId('budget-screen')).toBeTruthy());
+    // Let the Budget tab's own load settle inside the test.
+    await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+    const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
+    expect(navErrors).toEqual([]);
+    errorSpy.mockRestore();
   });
 });

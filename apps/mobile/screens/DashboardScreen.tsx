@@ -12,11 +12,14 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { AuthContext } from '../lib/auth';
+import type { MainTabParamList } from '../lib/navigation';
+import { initialsFor } from '../lib/profile';
 import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
-import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';
+import { COLORS, CATEGORY_META, RADIUS, budgetBarColor } from '../lib/theme';
 import {
   CategoryTotal,
   budgetUsagePct,
@@ -161,6 +164,7 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
 
 export default function DashboardScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,6 +210,9 @@ export default function DashboardScreen(): React.ReactElement {
   const thisWeekSpent = sumTotals(receiptsSince(receipts, 7, now));
   const totalBudget = sumLimits(budgets);
   const budgetPercentage = budgetUsagePct(totalSpent, totalBudget);
+  // With no budget, "0% used" would read as "on track" — show a dash and
+  // make the stat a shortcut to setting one up instead.
+  const hasBudget = totalBudget > 0;
 
   const categoryTotals = sortedCategoryTotals(monthReceipts);
   const budgetsByCategory = indexBudgetsByCategory(budgets);
@@ -217,10 +224,10 @@ export default function DashboardScreen(): React.ReactElement {
       {/* Header — full-bleed white bar, fixed above the scrolling content */}
       <View style={styles.header} testID="dashboard-header">
         <View style={{ flex: 1 }}>
-          <Text style={styles.greeting} testID="dashboard-greeting">{greetingFor(now)}</Text>
+          <Text style={styles.greeting} testID="dashboard-greeting">{greetingFor(now, auth.userName)}</Text>
           <Text style={styles.title}>My Finances</Text>
         </View>
-        <Avatar initials={auth.userEmail ? auth.userEmail.substring(0, 2).toUpperCase() : 'U'} />
+        <Avatar initials={initialsFor(auth.userName, auth.userEmail)} />
       </View>
 
       <ScrollView
@@ -256,10 +263,23 @@ export default function DashboardScreen(): React.ReactElement {
                 <Text style={styles.statLabel}>Receipts</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue} testID="hero-budget-pct">{Math.round(budgetPercentage)}%</Text>
-                <Text style={styles.statLabel}>Budget used</Text>
-              </View>
+              {hasBudget ? (
+                <View style={styles.statItem} testID="hero-budget-stat">
+                  <Text style={styles.statValue} testID="hero-budget-pct">{Math.round(budgetPercentage)}%</Text>
+                  <Text style={styles.statLabel} testID="hero-budget-label">Budget used</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.statItem}
+                  onPress={() => navigation.navigate('Budget')}
+                  accessibilityRole="button"
+                  accessibilityLabel="No budget set. Set a budget"
+                  testID="hero-budget-stat"
+                >
+                  <Text style={styles.statValue} testID="hero-budget-pct">—</Text>
+                  <Text style={styles.statLabel} testID="hero-budget-label">No budget</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </LinearGradient>
@@ -281,6 +301,15 @@ export default function DashboardScreen(): React.ReactElement {
             <MaterialCommunityIcons name="receipt" size={40} color={COLORS.textSecondary} />
             <Text style={styles.emptyStateTitle}>No receipts yet</Text>
             <Text style={styles.emptyStateSubtitle}>Scan your first receipt to see it here</Text>
+            <TouchableOpacity
+              style={styles.emptyStateButton}
+              onPress={() => navigation.navigate('Scan')}
+              accessibilityRole="button"
+              testID="dashboard-scan-first"
+            >
+              <MaterialCommunityIcons name="camera-outline" size={18} color={COLORS.buttonText} />
+              <Text style={styles.emptyStateButtonText}>Scan your first receipt</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -449,6 +478,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 46,
+    paddingHorizontal: 20,
+    marginTop: 12,
+    borderRadius: RADIUS.button,
+    backgroundColor: COLORS.button,
+  },
+  emptyStateButtonText: {
+    color: COLORS.buttonText,
+    fontSize: 15,
+    fontWeight: '600',
   },
   section: {
     paddingHorizontal: 16,

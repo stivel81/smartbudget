@@ -3,10 +3,12 @@ import { Image, StyleSheet } from 'react-native';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react-native';
 import { budgetBarColor, COLORS } from '../../lib/theme';
 
+const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
   return {
     ...actual,
+    useNavigation: () => ({ navigate: mockNavigate }),
     // Run the focus effect immediately on mount instead of requiring a real navigator.
     useFocusEffect: (effect: () => void | (() => void)) => {
       const React = require('react');
@@ -32,7 +34,11 @@ import { AuthContext } from '../../lib/auth';
 const NOW = new Date(2026, 0, 22, 9, 0, 0);
 
 function renderDashboard(
-  { accessToken = 'test-token', userEmail = 'test@example.com' }: { accessToken?: string | null; userEmail?: string | null } = {}
+  {
+    accessToken = 'test-token',
+    userEmail = 'test@example.com',
+    userName = null,
+  }: { accessToken?: string | null; userEmail?: string | null; userName?: string | null } = {}
 ) {
   return render(
     <AuthContext.Provider
@@ -45,7 +51,7 @@ function renderDashboard(
         setRefreshToken: () => {},
         userEmail,
         setUserEmail: () => {},
-        userName: null,
+        userName,
         setUserName: () => {},
         logout: async () => {},
       }}
@@ -447,7 +453,7 @@ describe('DashboardScreen', () => {
   });
 
   describe('without budgets', () => {
-    it('shows no "of ₪X budget" line and 0% budget used (never NaN)', async () => {
+    it('shows no "of ₪X budget" line and "—" / "No budget" instead of 0% (never NaN)', async () => {
       mockGetReceipts.mockResolvedValue({
         receipts: [
           receipt('r1', { date: '2026-01-10', total: 80, items: [{ name: 'Milk', amount: 80, category: 'Groceries' }] }),
@@ -459,13 +465,16 @@ describe('DashboardScreen', () => {
 
       await waitFor(() => expect(screen.getByText('Spending by Category')).toBeTruthy());
       expect(screen.queryByText(/of ₪[\d,]+ budget/)).toBeNull();
-      expect(textOf('hero-budget-pct')).toBe('0%');
+      expect(textOf('hero-budget-pct')).toBe('—');
+      expect(textOf('hero-budget-label')).toBe('No budget');
+      expect(screen.queryByText('Budget used')).toBeNull();
+      expect(screen.queryByText(/^\d+%$/)).toBeNull();
       expect(screen.queryByText(/NaN|Infinity/)).toBeNull();
       const bar = StyleSheet.flatten(screen.getByTestId('category-bar-Groceries').props.style);
       expect(bar.width).toBe('100%');
     });
 
-    it('shows ₪0 and 0% with no receipts and no budgets', async () => {
+    it('shows ₪0 and "—" with no receipts and no budgets, and never "0%"', async () => {
       mockGetReceipts.mockResolvedValue({ receipts: [] });
       mockGetBudgets.mockResolvedValue({ budgets: [] });
 
@@ -475,8 +484,108 @@ describe('DashboardScreen', () => {
       expect(textOf('hero-spent')).toBe('₪0');
       expect(textOf('hero-week')).toBe('₪0');
       expect(textOf('hero-count')).toBe('0');
-      expect(textOf('hero-budget-pct')).toBe('0%');
+      expect(textOf('hero-budget-pct')).toBe('—');
+      expect(screen.getByText('No budget')).toBeTruthy();
+      expect(screen.queryByText('0%')).toBeNull();
       expect(screen.queryByText(/NaN|Infinity/)).toBeNull();
+    });
+
+    it('treats budgets whose limits sum to 0 as no budget', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 0)] });
+
+      renderDashboard();
+
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(textOf('hero-budget-pct')).toBe('—');
+      expect(screen.queryByText('0%')).toBeNull();
+    });
+
+    it('makes the "No budget" stat a button that opens the Budget tab', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+
+      const stat = screen.getByTestId('hero-budget-stat');
+      expect(stat.props.accessibilityRole).toBe('button');
+      fireEvent.press(stat);
+
+      expect(mockNavigate).toHaveBeenCalledTimes(1);
+      expect(mockNavigate).toHaveBeenCalledWith('Budget');
+    });
+  });
+
+  describe('with budgets', () => {
+    it('shows the rounded % and "Budget used", and the stat is not a button', async () => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [receipt('r1', { date: '2026-01-10', total: 125, items: [{ name: 'Milk', amount: 125, category: 'Groceries' }] })],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 300)] });
+
+      renderDashboard();
+
+      await waitFor(() => expect(textOf('hero-budget-pct')).toBe('42%'));
+      expect(textOf('hero-budget-label')).toBe('Budget used');
+      expect(screen.queryByText('No budget')).toBeNull();
+      expect(screen.queryByText('—')).toBeNull();
+      expect(screen.getByTestId('hero-budget-stat').props.accessibilityRole).toBeUndefined();
+      fireEvent.press(screen.getByTestId('hero-budget-stat'));
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('shows 0% (a real value) when a budget exists but nothing is spent', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 300)] });
+
+      renderDashboard();
+
+      await waitFor(() => expect(textOf('hero-budget-pct')).toBe('0%'));
+      expect(textOf('hero-budget-label')).toBe('Budget used');
+    });
+  });
+
+  describe('empty state', () => {
+    it('offers a primary "Scan your first receipt" button that opens the Scan tab', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+
+      const button = screen.getByTestId('dashboard-scan-first');
+      expect(within(button).getByText('Scan your first receipt')).toBeTruthy();
+      expect(button.props.accessibilityRole).toBe('button');
+      expect(StyleSheet.flatten(button.props.style).backgroundColor).toBe(COLORS.button);
+      fireEvent.press(button);
+
+      expect(mockNavigate).toHaveBeenCalledTimes(1);
+      expect(mockNavigate).toHaveBeenCalledWith('Scan');
+    });
+
+    it('has no scan button once there are receipts', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [receipt('r1', { date: '2026-01-10', total: 5 })] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+
+      await waitFor(() => expect(screen.getByText('Recent Receipts')).toBeTruthy());
+      expect(screen.queryByTestId('dashboard-scan-first')).toBeNull();
+      expect(screen.queryByText('No receipts yet')).toBeNull();
+    });
+
+    it('has no scan button while loading or after a load error', async () => {
+      let rejectLoad!: (e: unknown) => void;
+      mockGetReceipts.mockReturnValue(new Promise((_r, rej) => (rejectLoad = rej)));
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      expect(screen.queryByTestId('dashboard-scan-first')).toBeNull();
+
+      rejectLoad({ message: 'Failed to load receipts' });
+      await waitFor(() => expect(screen.getByText('Failed to load receipts')).toBeTruthy());
+      expect(screen.queryByTestId('dashboard-scan-first')).toBeNull();
     });
   });
 
@@ -498,16 +607,45 @@ describe('DashboardScreen', () => {
     });
   });
 
-  it('shows initials from the email, or "U" when there is none', async () => {
-    mockGetReceipts.mockResolvedValue({ receipts: [] });
-    mockGetBudgets.mockResolvedValue({ budgets: [] });
+  describe('greeting with the user\'s name', () => {
+    it('adds the first name when a name is known', async () => {
+      jest.setSystemTime(new Date(2026, 0, 22, 19, 0));
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
 
-    const { unmount } = renderDashboard();
-    await waitFor(() => expect(screen.getByText('TE')).toBeTruthy());
-    unmount();
+      renderDashboard({ userName: 'Adrian Schtivelmager' });
 
-    renderDashboard({ userEmail: null });
-    await waitFor(() => expect(screen.getByText('U')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(textOf('dashboard-greeting')).toBe('Good evening, Adrian');
+    });
+
+    it.each([null, '', '   '])('shows no name for userName %p', async (userName) => {
+      jest.setSystemTime(new Date(2026, 0, 22, 19, 0));
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard({ userName });
+
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(textOf('dashboard-greeting')).toBe('Good evening');
+    });
+  });
+
+  describe('avatar initials', () => {
+    it.each([
+      ['Adrian Schtivelmager', 'stivel@gmail.com', 'AS'],
+      [null, 'stivel@gmail.com', 'ST'],
+      ['אדריאן שטיבלמגר', 'stivel@gmail.com', 'אש'],
+      [null, null, '?'],
+    ])('name %p + email %p -> %p', async (userName, userEmail, expected) => {
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard({ userName, userEmail });
+
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(within(screen.getByTestId('dashboard-avatar')).getByText(expected)).toBeTruthy();
+    });
   });
 
   it('does not fetch without an access token', () => {

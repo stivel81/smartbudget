@@ -424,4 +424,19 @@ describe('greetingFor', () => {
     for (let h = 0; h < 24; h++) seen.add(greetingFor(at(h)));
     expect([...seen].sort()).toEqual(['Good afternoon', 'Good evening', 'Good morning']);
   });
+
+  describe('with a name', () => {
+    it.each([
+      [9, 'Adrian Schtivelmager', 'Good morning, Adrian'],
+      [14, 'Adrian', 'Good afternoon, Adrian'],
+      [19, '  Adrian   Schtivelmager ', 'Good evening, Adrian'],
+      [19, 'אדריאן שטיבלמגר', 'Good evening, אדריאן'],
+    ])('hour %i, name %p -> %p', (hour, name, expected) => {
+      expect(greetingFor(at(hour), name)).toBe(expected);
+    });
+
+    it.each([null, undefined, '', '   '])('adds no name for %p', (name) => {
+      expect(greetingFor(at(19), name)).toBe('Good evening');
+    });
+  });
 });

@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthContext } from '../lib/auth';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
-import { initialsFromEmail } from '../lib/profile';
+import { initialsFor } from '../lib/profile';
 import { errorMessage } from '../lib/errors';
 import type { SignedInStackParamList } from '../lib/navigation';
 
@@ -36,7 +36,8 @@ export default function ProfileScreen(): React.ReactElement {
   const [signingOut, setSigningOut] = useState(false);
 
   const email = auth.userEmail || '';
-  const initials = initialsFromEmail(email);
+  const name = auth.userName?.trim() || '';
+  const initials = initialsFor(name, email);
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -75,11 +76,26 @@ export default function ProfileScreen(): React.ReactElement {
             <View style={styles.avatar} testID="profile-avatar">
               <Text style={styles.avatarText}>{initials}</Text>
             </View>
+            {/* Name as the title with the email under it; email-only accounts
+                keep the email as the title with "Signed in" under it. */}
             <View style={styles.userInfo}>
-              <Text style={styles.userEmail} numberOfLines={1} testID="profile-email">
-                {email}
-              </Text>
-              <Text style={styles.userSubtitle}>Signed in</Text>
+              {name ? (
+                <>
+                  <Text style={styles.userTitle} numberOfLines={1} testID="profile-name">
+                    {name}
+                  </Text>
+                  <Text style={styles.userSubtitle} numberOfLines={1} testID="profile-email">
+                    {email}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.userTitle} numberOfLines={1} testID="profile-email">
+                    {email}
+                  </Text>
+                  <Text style={styles.userSubtitle}>Signed in</Text>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -188,7 +204,7 @@ const styles = StyleSheet.create({
   userInfo: {
     flex: 1,
   },
-  userEmail: {
+  userTitle: {
     fontFamily: FONT_FAMILY,
     fontSize: 15,
     fontWeight: '600',
