@@ -6,6 +6,7 @@ import {
   refreshSession,
   requestPasswordReset,
   resetPassword,
+  changePassword,
   API_BASE_URL,
 } from '../../lib/api';
 
@@ -172,6 +173,54 @@ describe('lib/api', () => {
         message: 'Could not reset password',
         code: 500,
       });
+    });
+  });
+
+  describe('changePassword', () => {
+    it('POSTs both passwords with the bearer token to /auth/change-password', async () => {
+      mockFetchOnce(200, { message: 'Password updated' });
+
+      const result = await changePassword('oldpassword1', 'newpassword2', 'access-tok');
+
+      expect(result).toEqual({ message: 'Password updated' });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(url).toBe(`${API_BASE_URL}/api/v1/auth/change-password`);
+      expect(options.method).toBe('POST');
+      expect(options.headers['Content-Type']).toBe('application/json');
+      expect(options.headers.Authorization).toBe('Bearer access-tok');
+      expect(JSON.parse(options.body)).toEqual({ currentPassword: 'oldpassword1', newPassword: 'newpassword2' });
+    });
+
+    it('throws the backend message and status for a wrong current password', async () => {
+      mockFetchOnce(400, { error: 'Current password is incorrect', status: 400 });
+
+      await expect(changePassword('wrong', 'newpassword2', 'tok')).rejects.toEqual({
+        message: 'Current password is incorrect',
+        code: 400,
+      });
+    });
+
+    it('throws with the status on 401 (expired session)', async () => {
+      mockFetchOnce(401, { error: 'Invalid or expired token', status: 401 });
+
+      await expect(changePassword('a', 'newpassword2', 'expired')).rejects.toMatchObject({ code: 401 });
+    });
+
+    it('falls back to a generic message when the error body has none', async () => {
+      mockFetchOnce(500, {});
+
+      await expect(changePassword('a', 'newpassword2', 'tok')).rejects.toEqual({
+        message: 'Could not change password',
+        code: 500,
+      });
+    });
+
+    it('propagates network failures untouched (no code), for apiErrorMessage to handle', async () => {
+      const networkError = new TypeError('Network request failed');
+      global.fetch = jest.fn().mockRejectedValue(networkError) as jest.Mock;
+
+      await expect(changePassword('a', 'newpassword2', 'tok')).rejects.toBe(networkError);
     });
   });
 });

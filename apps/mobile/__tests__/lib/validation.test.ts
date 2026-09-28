@@ -7,6 +7,8 @@ import {
   sanitizeResetCode,
   validateResetCode,
   calculatePasswordStrength,
+  validatePasswordChange,
+  SAME_PASSWORD_MESSAGE,
 } from '../../lib/validation';
 
 describe('lib/validation', () => {
@@ -92,6 +94,36 @@ describe('lib/validation', () => {
       ['abcdefghijkl', 2, 'Fair'],
     ])('%p -> %i bars, %p', (pw, strength, label) => {
       expect(calculatePasswordStrength(pw)).toEqual({ strength, label });
+    });
+  });
+
+  describe('validatePasswordChange', () => {
+    it('accepts a present current password and a different, valid new one', () => {
+      expect(validatePasswordChange('oldpassword', 'newpassword1')).toBeNull();
+    });
+
+    it('requires the current password first', () => {
+      expect(validatePasswordChange('', '')).toBe('Current password is required');
+      expect(validatePasswordChange('', 'newpassword1')).toBe('Current password is required');
+    });
+
+    it('applies the same new-password rules as signup/reset', () => {
+      expect(validatePasswordChange('oldpassword', '')).toBe(validateNewPassword(''));
+      expect(validatePasswordChange('oldpassword', 'short')).toBe(validateNewPassword('short'));
+      expect(validatePasswordChange('oldpassword', '        ')).toBe('Password is required');
+    });
+
+    it('accepts a new password of exactly the minimum length', () => {
+      expect(validatePasswordChange('oldpassword', '12345678')).toBeNull();
+    });
+
+    it('rejects a new password equal to the current one (matching the backend message)', () => {
+      expect(SAME_PASSWORD_MESSAGE).toBe('New password must be different from your current password');
+      expect(validatePasswordChange('samepassword', 'samepassword')).toBe(SAME_PASSWORD_MESSAGE);
+    });
+
+    it('does not trim when comparing (a trailing space is a different password)', () => {
+      expect(validatePasswordChange('samepassword', 'samepassword ')).toBeNull();
     });
   });
 });

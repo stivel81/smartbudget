@@ -199,3 +199,50 @@ describe('App password reset flow', () => {
     expect(screen.getByTestId('login-email-input')).toBeTruthy();
   });
 });
+
+describe('App Profile menu navigation (real navigator)', () => {
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  async function signInAndOpenProfile() {
+    mockFetch({
+      '/api/v1/auth/refresh': () =>
+        okJson({
+          session: {
+            access_token: 'acc',
+            refresh_token: 'ref',
+            user: { id: 'u1', email: 'stored@example.com' },
+          },
+        }),
+      '/api/v1/receipts': () => okJson({ receipts: [] }),
+      '/api/v1/budgets': () => okJson({ budgets: [] }),
+    });
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-refresh-token');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-menu-settings')).toBeTruthy());
+  }
+
+  it.each([
+    ['profile-menu-settings', 'settings-screen', 'settings-back-button'],
+    ['profile-menu-privacy', 'privacy-screen', 'privacy-back-button'],
+    ['profile-menu-help', 'help-screen', 'help-back-button'],
+  ])('%s pushes %s, and its back button returns to Profile', async (row, screenId, backId) => {
+    const errorSpy = jest.spyOn(console, 'error');
+    await signInAndOpenProfile();
+
+    fireEvent.press(screen.getByTestId(row));
+    await waitFor(() => expect(screen.getByTestId(screenId)).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId(backId));
+    await waitFor(() => expect(screen.queryByTestId(screenId)).toBeNull());
+    expect(screen.getByTestId('profile-menu-settings')).toBeTruthy();
+
+    const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
+    expect(navErrors).toEqual([]);
+    errorSpy.mockRestore();
+  });
+});

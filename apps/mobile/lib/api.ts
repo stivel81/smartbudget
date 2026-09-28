@@ -386,3 +386,37 @@ export async function resetPassword(
 
   return response.json();
 }
+
+export interface ChangePasswordResponse {
+  message: string;
+}
+
+/**
+ * Change the signed-in user's password. The backend verifies
+ * `currentPassword` first; a wrong one rejects with code 400 and the
+ * message "Current password is incorrect". The current session stays valid.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  accessToken: string
+): Promise<ChangePasswordResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Could not change password',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}

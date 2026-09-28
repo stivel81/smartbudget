@@ -13,7 +13,13 @@ jest.mock('@expo/vector-icons', () => {
   return { MaterialCommunityIcons };
 });
 
-import ProfileScreen from '../../screens/ProfileScreen';
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('@react-navigation/native'),
+  useNavigation: () => ({ navigate: mockNavigate, goBack: jest.fn() }),
+}));
+
+import ProfileScreen, { MENU_ITEMS } from '../../screens/ProfileScreen';
 import { AuthContext, AuthContextType } from '../../lib/auth';
 import { COLORS } from '../../lib/theme';
 
@@ -74,17 +80,34 @@ describe('ProfileScreen', () => {
     expect(screen.getByTestId('profile-email').props.children).toBe('');
   });
 
-  it('lists the settings menu rows', () => {
+  it('lists exactly the Settings, Privacy Policy and Help & Support rows', () => {
     renderProfile();
     expect(screen.getByText('General')).toBeTruthy();
-    ['Settings', 'Notifications', 'Privacy Policy', 'Help & Support'].forEach((label) => {
+    ['Settings', 'Privacy Policy', 'Help & Support'].forEach((label) => {
       expect(screen.getByText(label)).toBeTruthy();
     });
-    ['cog-outline', 'bell-outline', 'file-document-outline', 'help-circle-outline'].forEach((icon) => {
+    ['cog-outline', 'file-document-outline', 'help-circle-outline'].forEach((icon) => {
       expect(screen.getByTestId(`icon-${icon}`)).toBeTruthy();
     });
-    // Rows are still placeholders: pressing one must not sign out or alert.
-    fireEvent.press(screen.getByTestId('profile-menu-0'));
+    expect(MENU_ITEMS.map((i) => i.label)).toEqual(['Settings', 'Privacy Policy', 'Help & Support']);
+  });
+
+  it('has no Notifications row (push notifications are a later phase)', () => {
+    renderProfile();
+    expect(screen.queryByText('Notifications')).toBeNull();
+    expect(screen.queryByTestId('icon-bell-outline')).toBeNull();
+  });
+
+  it.each([
+    ['profile-menu-settings', 'Settings'],
+    ['profile-menu-privacy', 'PrivacyPolicy'],
+    ['profile-menu-help', 'HelpSupport'],
+  ])('%s navigates to %s (and does not sign out or alert)', (testID, route) => {
+    const { value } = renderProfile();
+    fireEvent.press(screen.getByTestId(testID));
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith(route);
+    expect(value.logout).not.toHaveBeenCalled();
     expect(alertSpy).not.toHaveBeenCalled();
   });
 

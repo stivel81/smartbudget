@@ -1,4 +1,4 @@
-// Pure auth-form validation shared by Login, Signup and ForgotPassword.
+// Pure auth-form validation shared by Login, Signup, ForgotPassword and Settings.
 // Each validate* returns the user-facing error message, or null when valid.
 // Rules mirror the backend (apps/backend/src/routes/auth.ts), which remains
 // the source of truth — these exist to fail fast with a friendly message.
@@ -25,6 +25,21 @@ export function validateNewPassword(password: string): string | null {
   if (password.length < MIN_PASSWORD_LENGTH) {
     return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
   }
+  return null;
+}
+
+export const SAME_PASSWORD_MESSAGE = 'New password must be different from your current password';
+
+/**
+ * Settings → Change password. Checks, in order: current password present,
+ * new password meets the signup/reset rules, and differs from the current
+ * one (the backend enforces all three too).
+ */
+export function validatePasswordChange(currentPassword: string, newPassword: string): string | null {
+  if (!currentPassword) return 'Current password is required';
+  const ruleError = validateNewPassword(newPassword);
+  if (ruleError) return ruleError;
+  if (newPassword === currentPassword) return SAME_PASSWORD_MESSAGE;
   return null;
 }
 

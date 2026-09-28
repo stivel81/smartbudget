@@ -18,6 +18,9 @@ import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import BudgetScreen from './screens/BudgetScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import SettingsScreen from './screens/SettingsScreen';
+import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
+import HelpSupportScreen from './screens/HelpSupportScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -203,11 +206,14 @@ export default function App() {
                 <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen as any} />
               </Stack.Group>
             ) : (
-              // Main App Stack
-              <Stack.Screen
-                name="Main"
-                component={BottomTabNavigator}
-              />
+              // Main App Stack: tabs, plus screens pushed from Profile. Each
+              // draws its own V2 header with a back button (headerShown: false).
+              <Stack.Group>
+                <Stack.Screen name="Main" component={BottomTabNavigator} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
+                <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+              </Stack.Group>
             )}
           </Stack.Navigator>
         </NavigationContainer>

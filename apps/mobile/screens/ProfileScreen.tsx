@@ -10,23 +10,29 @@ import {
   Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthContext } from '../lib/auth';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 import { initialsFromEmail } from '../lib/profile';
 import { errorMessage } from '../lib/errors';
+import type { SignedInStackParamList } from '../lib/navigation';
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 
-// Menu rows are placeholders (no destinations yet) — same as before the restyle.
-const MENU_ITEMS: { label: string; icon: IconName }[] = [
-  { label: 'Settings', icon: 'cog-outline' },
-  { label: 'Notifications', icon: 'bell-outline' },
-  { label: 'Privacy Policy', icon: 'file-document-outline' },
-  { label: 'Help & Support', icon: 'help-circle-outline' },
+type MenuRoute = Exclude<keyof SignedInStackParamList, 'Main'>;
+
+// Each row pushes a screen on the signed-in root stack (App.tsx).
+// No Notifications row: push notifications arrive in a later phase.
+export const MENU_ITEMS: { label: string; icon: IconName; route: MenuRoute; testID: string }[] = [
+  { label: 'Settings', icon: 'cog-outline', route: 'Settings', testID: 'profile-menu-settings' },
+  { label: 'Privacy Policy', icon: 'file-document-outline', route: 'PrivacyPolicy', testID: 'profile-menu-privacy' },
+  { label: 'Help & Support', icon: 'help-circle-outline', route: 'HelpSupport', testID: 'profile-menu-help' },
 ];
 
 export default function ProfileScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
+  const navigation = useNavigation<NativeStackNavigationProp<SignedInStackParamList>>();
   const [signingOut, setSigningOut] = useState(false);
 
   const email = auth.userEmail || '';
@@ -85,8 +91,9 @@ export default function ProfileScreen(): React.ReactElement {
             <TouchableOpacity
               key={item.label}
               style={[styles.menuItem, index < MENU_ITEMS.length - 1 && styles.menuItemDivider]}
+              onPress={() => navigation.navigate(item.route)}
               accessibilityRole="button"
-              testID={`profile-menu-${index}`}
+              testID={item.testID}
             >
               <View style={styles.menuIcon}>
                 <MaterialCommunityIcons name={item.icon} size={17} color={COLORS.textPrimary} />
