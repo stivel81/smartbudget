@@ -1,4 +1,4 @@
-import { errorMessage } from '../../lib/errors';
+import { errorMessage, apiErrorMessage } from '../../lib/errors';
 
 describe('lib/errors — errorMessage', () => {
   it('returns an Error instance message', () => {
@@ -18,5 +18,24 @@ describe('lib/errors — errorMessage', () => {
     ['undefined', undefined],
   ])('falls back for %s', (_label, err) => {
     expect(errorMessage(err, 'fallback')).toBe('fallback');
+  });
+});
+
+describe('lib/errors — apiErrorMessage', () => {
+  it('returns the backend message for an ApiError (numeric HTTP code)', () => {
+    expect(apiErrorMessage({ message: 'Invalid or expired code', code: 400 }, 'network')).toBe('Invalid or expired code');
+  });
+
+  it('falls back when an ApiError has no usable message', () => {
+    expect(apiErrorMessage({ message: '', code: 500 }, 'network')).toBe('network');
+  });
+
+  it.each([
+    ['a fetch network TypeError', new TypeError('Network request failed')],
+    ['an object with a non-numeric code', { message: 'x', code: 'ECONNRESET' }],
+    ['null', null],
+    ['a string', 'oops'],
+  ])('uses the network fallback for %s', (_label, err) => {
+    expect(apiErrorMessage(err, 'network')).toBe('network');
   });
 });

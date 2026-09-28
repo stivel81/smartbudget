@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 
 const mockLogin = jest.fn();
@@ -8,6 +9,7 @@ jest.mock('../../lib/api', () => ({
 
 import LoginScreen from '../../screens/LoginScreen';
 import { AuthContext, AuthContextType } from '../../App';
+import { COLORS } from '../../lib/theme';
 
 function renderLogin(overrides: Partial<AuthContextType> = {}) {
   const navigation = { reset: jest.fn(), navigate: jest.fn() } as any;
@@ -89,7 +91,8 @@ describe('LoginScreen', () => {
     expect(auth.setAccessToken).toHaveBeenCalledWith('access-tok');
     expect(auth.setRefreshToken).toHaveBeenCalledWith('refresh-tok');
     expect(auth.setUserEmail).toHaveBeenCalledWith('a@b.com');
-    expect(navigation.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Main' }] });
+    // App.tsx swaps to the Main stack on isAuthenticated; no manual reset.
+    expect(navigation.reset).not.toHaveBeenCalled();
   });
 
   it('shows the backend error message on failed login', async () => {
@@ -101,5 +104,75 @@ describe('LoginScreen', () => {
     fireEvent.press(screen.getByTestId('login-button'));
 
     await waitFor(() => expect(screen.getByText('Invalid email or password')).toBeTruthy());
+  });
+
+  describe('V2 layout', () => {
+    it('uses a page background that differs from the input background (inputs visible)', () => {
+      renderLogin();
+
+      const pageBg = StyleSheet.flatten(screen.getByTestId('login-screen').props.style).backgroundColor;
+      const inputBg = StyleSheet.flatten(screen.getByTestId('login-email-input').props.style).backgroundColor;
+
+      expect(inputBg).toBe(COLORS.background);
+      expect(pageBg).toBe(COLORS.surface);
+      expect(pageBg).not.toBe(inputBg);
+    });
+
+    it('does not show social sign-in (out of Phase 1)', () => {
+      renderLogin();
+
+      expect(screen.queryByText('Google')).toBeNull();
+      expect(screen.queryByText('Apple')).toBeNull();
+      expect(screen.queryByText('OR')).toBeNull();
+      expect(screen.queryByTestId('login-google-button')).toBeNull();
+      expect(screen.queryByTestId('login-apple-button')).toBeNull();
+    });
+  });
+
+  describe('Forgot password link', () => {
+    it('navigates to ForgotPassword, prefilling the trimmed email typed so far', () => {
+      const { navigation } = renderLogin();
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), '  a@b.com ');
+      fireEvent.press(screen.getByTestId('login-forgot-password'));
+
+      expect(navigation.navigate).toHaveBeenCalledTimes(1);
+      expect(navigation.navigate).toHaveBeenCalledWith('ForgotPassword', { email: 'a@b.com' });
+    });
+
+    it('navigates without params when no email has been typed', () => {
+      const { navigation } = renderLogin();
+
+      fireEvent.press(screen.getByTestId('login-forgot-password'));
+
+      expect(navigation.navigate).toHaveBeenCalledWith('ForgotPassword', undefined);
+    });
+
+    it('is disabled while a login is in flight', async () => {
+      mockLogin.mockReturnValue(new Promise(() => {}));
+      const { navigation } = renderLogin();
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+      fireEvent.press(screen.getByTestId('login-button'));
+      await waitFor(() => expect(screen.getByTestId('login-forgot-password')).toBeDisabled());
+
+      fireEvent.press(screen.getByTestId('login-forgot-password'));
+      expect(navigation.navigate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('trims the email before logging in', async () => {
+    mockLogin.mockResolvedValue({
+      session: { access_token: 'a', refresh_token: 'r', user: { id: 'u1', email: 'a@b.com' } },
+    });
+    const { auth } = renderLogin();
+
+    fireEvent.changeText(screen.getByTestId('login-email-input'), ' a@b.com ');
+    fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('login-button'));
+
+    await waitFor(() => expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true));
+    expect(mockLogin).toHaveBeenCalledWith('a@b.com', 'password123');
   });
 });

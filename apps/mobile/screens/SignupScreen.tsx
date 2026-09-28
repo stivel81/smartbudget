@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,11 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signup } from '../lib/api';
+import { validateEmail, validateNewPassword } from '../lib/validation';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
 type RootStackParamList = {
@@ -25,25 +27,6 @@ type RootStackParamList = {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Signup'>;
 
-function calculatePasswordStrength(password: string): {
-  strength: number;
-  label: string;
-} {
-  if (!password) return { strength: 0, label: '' };
-
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (password.length >= 12) score++;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^a-zA-Z0-9]/.test(password)) score++;
-
-  if (score <= 1) return { strength: 1, label: 'Weak' };
-  if (score <= 2) return { strength: 2, label: 'Fair' };
-  if (score <= 3) return { strength: 3, label: 'Good' };
-  return { strength: 4, label: 'Strong' };
-}
-
 export default function SignupScreen({ navigation }: Props) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -51,11 +34,6 @@ export default function SignupScreen({ navigation }: Props) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const passwordStrength = useMemo(
-    () => calculatePasswordStrength(password),
-    [password]
-  );
 
   const handleSignup = async () => {
     setError('');
@@ -70,23 +48,15 @@ export default function SignupScreen({ navigation }: Props) {
       return;
     }
 
-    if (!email.trim()) {
-      setError('Email is required');
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Please enter a valid email');
-      return;
-    }
-
-    if (!password.trim()) {
-      setError('Password is required');
-      return;
-    }
-
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const passwordError = validateNewPassword(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -94,10 +64,11 @@ export default function SignupScreen({ navigation }: Props) {
 
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
-      await signup(email, password, fullName);
+      const trimmedEmail = email.trim();
+      await signup(trimmedEmail, password, fullName);
       Alert.alert(
         'Check your email',
-        `We sent a verification link to ${email}. Verify your email before signing in.`
+        `We sent a verification link to ${trimmedEmail}. Verify your email before signing in.`
       );
       navigation.reset({
         index: 0,
@@ -111,7 +82,7 @@ export default function SignupScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} testID="signup-screen">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoid}
@@ -194,24 +165,7 @@ export default function SignupScreen({ navigation }: Props) {
           </View>
 
           {/* Password Strength Indicator */}
-          <View style={styles.strengthContainer}>
-            <View style={styles.barsContainer}>
-              {[1, 2, 3, 4].map((bar) => (
-                <View
-                  key={bar}
-                  style={[
-                    styles.strengthBar,
-                    bar <= passwordStrength.strength
-                      ? styles.strengthBarFilled
-                      : styles.strengthBarEmpty,
-                  ]}
-                />
-              ))}
-            </View>
-            {passwordStrength.label && (
-              <Text style={styles.strengthLabel}>{passwordStrength.label}</Text>
-            )}
-          </View>
+          <PasswordStrengthMeter password={password} testIDPrefix="signup" />
 
           {/* Create Account Button */}
           <TouchableOpacity
@@ -226,33 +180,6 @@ export default function SignupScreen({ navigation }: Props) {
               <Text style={styles.primaryButtonText}>Create account</Text>
             )}
           </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={styles.dividerContainer}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Buttons */}
-          <View style={styles.socialButtonsContainer}>
-            <TouchableOpacity
-              style={styles.socialButton}
-              disabled={loading}
-              testID="signup-google-button"
-            >
-              <FontAwesome name="google" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.socialButtonText}>Google</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.socialButton}
-              disabled={loading}
-              testID="signup-apple-button"
-            >
-              <FontAwesome name="apple" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.socialButtonText}>Apple</Text>
-            </TouchableOpacity>
-          </View>
 
           {/* Footer Link */}
           <View style={styles.footer}>
@@ -276,9 +203,11 @@ export default function SignupScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // White page (V2 spec: auth screens have a white status bar/background)
+  // so the COLORS.background-filled inputs stand out against it.
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surface,
   },
   keyboardAvoid: {
     flex: 1,
@@ -351,35 +280,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '400',
   },
-  strengthContainer: {
-    marginBottom: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  barsContainer: {
-    flexDirection: 'row',
-    gap: 6,
-    flex: 1,
-  },
-  strengthBar: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-  },
-  strengthBarFilled: {
-    backgroundColor: COLORS.success,
-  },
-  strengthBarEmpty: {
-    backgroundColor: COLORS.border,
-  },
-  strengthLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '600',
-    color: COLORS.success,
-    minWidth: 40,
-  },
   primaryButton: {
     height: 50,
     borderRadius: RADIUS.button,
@@ -395,46 +295,6 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     color: COLORS.buttonText,
     fontSize: 15,
-    fontWeight: '600',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    fontFamily: FONT_FAMILY,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginHorizontal: 12,
-    fontWeight: '500',
-  },
-  socialButtonsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  socialButton: {
-    flex: 1,
-    height: 46,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.input,
-    backgroundColor: COLORS.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  socialButtonText: {
-    fontFamily: FONT_FAMILY,
-    color: COLORS.textPrimary,
-    fontSize: 14,
     fontWeight: '600',
   },
   footer: {

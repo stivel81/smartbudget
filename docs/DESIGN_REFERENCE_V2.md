@@ -112,9 +112,9 @@ Layout (top to bottom):
 - Password input field (with show/hide toggle)
 - Forgot password link — right aligned, 12px, black, weight 500
 - Sign in button (black, full width)
-- Divider: "OR" with lines
-- Social row: Google button | Apple button (side by side, equal width)
+- ~~Divider: "OR" with lines~~ / ~~Social row: Google | Apple~~ — removed: social sign-in is out of scope for Phase 1
 - Footer: "No account? Sign up" — 12px, link in black bold
+- Page background: white (#ffffff), so the #f2f2f7 input fields stand out
 
 ---
 
@@ -134,8 +134,7 @@ Layout (top to bottom):
   - Empty bars: #e5e5ea
   - Label: "Strong" in #30d158 at 10px
 - Create account button (black, full width)
-- Divider: "OR"
-- Social row: Google | Apple
+- ~~Divider: "OR"~~ / ~~Social row: Google | Apple~~ — removed: social sign-in is out of scope for Phase 1
 - Footer: "Have an account? Sign in"
 - Terms: 10px, #c7c7cc — "By continuing you agree to our Terms & Privacy Policy"
 
@@ -240,6 +239,7 @@ Layout (top to bottom):
 ## Navigation Flow
 Unauthenticated:
   Login ↔ Sign up
+  Login → Forgot password (email → 6-digit code + new password → signed in)
 
 Authenticated (bottom nav):
   Home (Dashboard) | Scan (Scanner) | Budget | Profile

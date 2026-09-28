@@ -11,15 +11,17 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { MaterialCommunityIcons, Feather, FontAwesome } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { login } from '../lib/api';
+import { isValidEmail } from '../lib/validation';
 import { AuthContext } from '../App';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
 type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
+  ForgotPassword: { email?: string } | undefined;
   Main: undefined;
 };
 
@@ -46,7 +48,7 @@ export default function LoginScreen({ navigation }: Props) {
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email.trim())) {
       setError('Please enter a valid email');
       return;
     }
@@ -54,17 +56,14 @@ export default function LoginScreen({ navigation }: Props) {
     setLoading(true);
 
     try {
-      const result = await login(email, password);
-      // On success, set authentication state
+      const result = await login(email.trim(), password);
+      // On success, set authentication state. App.tsx renders the Main
+      // stack once isAuthenticated flips — a manual navigation.reset to
+      // 'Main' here would fire before Main is registered ("not handled").
       auth.setAccessToken(result.session.access_token);
       auth.setRefreshToken(result.session.refresh_token);
       auth.setUserEmail(result.session.user.email);
       auth.setIsAuthenticated(true);
-      // Navigate to the main app
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Main' }],
-      });
     } catch (err: any) {
       setError(err.message || 'Login failed. Please try again.');
       setPassword('');
@@ -73,8 +72,14 @@ export default function LoginScreen({ navigation }: Props) {
     }
   };
 
+  const openForgotPassword = () => {
+    // Carry over whatever the user already typed so they don't retype it.
+    const trimmed = email.trim();
+    navigation.navigate('ForgotPassword', trimmed ? { email: trimmed } : undefined);
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} testID="login-screen">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoid}
@@ -143,7 +148,12 @@ export default function LoginScreen({ navigation }: Props) {
           </View>
 
           {/* Forgot Password Link */}
-          <TouchableOpacity style={styles.forgotPasswordContainer}>
+          <TouchableOpacity
+            style={styles.forgotPasswordContainer}
+            onPress={openForgotPassword}
+            disabled={loading}
+            testID="login-forgot-password"
+          >
             <Text style={styles.forgotPasswordText}>Forgot password?</Text>
           </TouchableOpacity>
 
@@ -160,33 +170,6 @@ export default function LoginScreen({ navigation }: Props) {
               <Text style={styles.primaryButtonText}>Sign in</Text>
             )}
           </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={styles.dividerContainer}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Buttons */}
-          <View style={styles.socialButtonsContainer}>
-            <TouchableOpacity
-              style={styles.socialButton}
-              disabled={loading}
-              testID="login-google-button"
-            >
-              <FontAwesome name="google" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.socialButtonText}>Google</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.socialButton}
-              disabled={loading}
-              testID="login-apple-button"
-            >
-              <FontAwesome name="apple" size={18} color={COLORS.textPrimary} />
-              <Text style={styles.socialButtonText}>Apple</Text>
-            </TouchableOpacity>
-          </View>
 
           {/* Footer Link */}
           <View style={styles.footer}>
@@ -205,9 +188,11 @@ export default function LoginScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // White page (V2 spec: auth screens have a white status bar/background)
+  // so the COLORS.background-filled inputs stand out against it.
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surface,
   },
   keyboardAvoid: {
     flex: 1,
@@ -316,46 +301,6 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     color: COLORS.buttonText,
     fontSize: 15,
-    fontWeight: '600',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    fontFamily: FONT_FAMILY,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginHorizontal: 12,
-    fontWeight: '500',
-  },
-  socialButtonsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 32,
-  },
-  socialButton: {
-    flex: 1,
-    height: 46,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.input,
-    backgroundColor: COLORS.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  socialButtonText: {
-    fontFamily: FONT_FAMILY,
-    color: COLORS.textPrimary,
-    fontSize: 14,
     fontWeight: '600',
   },
   footer: {

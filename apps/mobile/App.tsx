@@ -12,6 +12,7 @@ import { COLORS } from './lib/theme';
 // Import screens
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import BudgetScreen from './screens/BudgetScreen';
@@ -23,6 +24,7 @@ const Stack = createNativeStackNavigator();
 type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
+  ForgotPassword: { email?: string } | undefined;
   Main: undefined;
 };
 
@@ -221,6 +223,7 @@ export default function App() {
               <Stack.Group>
                 <Stack.Screen name="Login" component={LoginScreen as any} />
                 <Stack.Screen name="Signup" component={SignupScreen as any} />
+                <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen as any} />
               </Stack.Group>
             ) : (
               // Main App Stack

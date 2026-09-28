@@ -329,3 +329,60 @@ export async function signup(
 
   return response.json();
 }
+
+export interface ForgotPasswordResponse {
+  message: string;
+}
+
+/**
+ * Ask the backend to email a 6-digit reset code. The backend answers the
+ * same generic 200 whether or not the account exists, so success here does
+ * not mean the email is registered.
+ */
+export async function requestPasswordReset(email: string): Promise<ForgotPasswordResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/forgot-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Could not send reset code',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+/**
+ * Redeem the emailed code and set a new password. Resolves with a fresh
+ * session in the same shape as login(), so the caller can sign straight in.
+ */
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string
+): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/reset-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, code, newPassword }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Could not reset password',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
