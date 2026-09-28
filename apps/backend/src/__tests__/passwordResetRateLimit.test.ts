@@ -106,4 +106,41 @@ describe('Password reset rate limiting', () => {
     const login = await request(app).post('/api/v1/auth/login').send({ email: 'a@b.com', password: 'wrong-password' });
     expect(login.status).toBe(401);
   });
+
+  it('returns 429 on change-password after 5 attempts (401s count too) and never reaches Supabase', async () => {
+    const { app, mock, limit } = freshApp();
+
+    for (let i = 0; i < limit; i++) {
+      const res = await request(app)
+        .post('/api/v1/auth/change-password')
+        .send({ currentPassword: 'oldpassword123', newPassword: 'newpassword456' });
+      expect(res.status).toBe(401); // no token: still burns the budget
+    }
+
+    mock.queueResult({ error: null });
+    const limited = await request(app)
+      .post('/api/v1/auth/change-password')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ currentPassword: 'oldpassword123', newPassword: 'newpassword456' });
+
+    expect(limited.status).toBe(429);
+    expect(mock.mockIsolatedSignIn).not.toHaveBeenCalled();
+    expect(mock.mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('keeps change-password on its own budget: exhausting it does not block reset-password', async () => {
+    const { app, mock, limit } = freshApp();
+
+    for (let i = 0; i < limit; i++) {
+      await request(app).post('/api/v1/auth/change-password').send({});
+    }
+    mock.queueResult({ error: null });
+    const limited = await request(app).post('/api/v1/auth/change-password').send({});
+    expect(limited.status).toBe(429);
+
+    const reset = await request(app)
+      .post('/api/v1/auth/reset-password')
+      .send({ email: 'a@b.com', code: 'nope', newPassword: 'newpassword123' });
+    expect(reset.status).toBe(400);
+  });
 });

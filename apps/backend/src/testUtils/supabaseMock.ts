@@ -49,9 +49,9 @@ function makeBuilder(): any {
   return builder;
 }
 
-export const mockGetUser = jest.fn(async (token: string) => {
+export const mockGetUser = jest.fn(async (token: string): Promise<any> => {
   if (token === 'valid-token') {
-    return { data: { user: { id: 'user-123' } }, error: null };
+    return { data: { user: { id: 'user-123', email: 'user@example.com' } }, error: null };
   }
   return { data: { user: null }, error: { message: 'Invalid token' } };
 });
@@ -101,11 +101,18 @@ export const mockResetPasswordForEmail = jest.fn(async (..._args: unknown[]): Pr
 // updateUser ran on the same instance as verifyOtp.
 export const mockVerifyOtp = jest.fn();
 export const mockUpdateUser = jest.fn();
+// Change password verifies the current password with signInWithPassword on
+// an isolated client — deliberately a different mock from the shared
+// client's mockSignInWithPassword, so tests can prove which client ran it.
+export const mockIsolatedSignIn = jest.fn();
+export const mockIsolatedAdminSignOut = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
 export const isolatedClients: any[] = [];
 export const createIsolatedAuthClient = jest.fn(() => {
   const client: any = { auth: {} };
   client.auth.verifyOtp = jest.fn((...args: unknown[]) => mockVerifyOtp(...args));
   client.auth.updateUser = jest.fn((...args: unknown[]) => mockUpdateUser(...args));
+  client.auth.signInWithPassword = jest.fn((...args: unknown[]) => mockIsolatedSignIn(...args));
+  client.auth.admin = { signOut: jest.fn((...args: unknown[]) => mockIsolatedAdminSignOut(...args)) };
   isolatedClients.push(client);
   return client;
 });

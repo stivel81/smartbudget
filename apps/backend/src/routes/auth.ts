@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabaseAuth, createIsolatedAuthClient } from '@smartbudget/shared/lib/supabaseAuth';
+import { supabase } from '@smartbudget/shared/lib/supabase';
+import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
 
 const router = Router();
 
@@ -47,6 +49,14 @@ interface ResetPasswordRequest {
   code?: unknown;
   newPassword?: unknown;
 }
+
+interface ChangePasswordRequest {
+  currentPassword?: unknown;
+  newPassword?: unknown;
+}
+
+export const WRONG_CURRENT_PASSWORD_MESSAGE = 'Current password is incorrect';
+export const SAME_PASSWORD_MESSAGE = 'New password must be different from your current password';
 
 interface RefreshRequest {
   refresh_token?: string;
@@ -386,6 +396,132 @@ router.post('/reset-password', async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('Reset password error:', err);
+    return res.status(500).json({
+      error: 'Internal server error',
+      status: 500,
+    });
+  }
+});
+
+// POST /api/v1/auth/change-password — signed-in user changes their password.
+//
+// 1. The current password is verified by signing in with the caller's email
+//    (taken from their verified access token, never from the body) on a
+//    fresh per-request client (createIsolatedAuthClient). signInWithPassword
+//    stores the resulting session on the client instance, so doing it on the
+//    shared supabaseAuth would leak sessions across concurrent requests (the
+//    bug class fixed in 9062cae). The throwaway session it creates is then
+//    revoked (scope 'local' — only that session, not the user's app session).
+// 2. The new password is set via the admin API for the token's user id.
+//
+// A wrong current password gets one generic 400; nothing else about the
+// Supabase response is exposed. Rate limited per IP in index.ts (5/15min),
+// which also caps current-password guessing with a stolen access token.
+router.post('/change-password', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const { currentPassword, newPassword } = req.body as ChangePasswordRequest;
+
+  if (
+    typeof currentPassword !== 'string' || !currentPassword ||
+    typeof newPassword !== 'string' || !newPassword
+  ) {
+    return res.status(400).json({
+      error: 'Missing required fields: currentPassword, newPassword',
+      status: 400,
+    });
+  }
+
+  const passwordError = passwordRuleError(newPassword);
+  if (passwordError) {
+    return res.status(400).json({
+      error: passwordError,
+      status: 400,
+    });
+  }
+
+  if (newPassword === currentPassword) {
+    return res.status(400).json({
+      error: SAME_PASSWORD_MESSAGE,
+      status: 400,
+    });
+  }
+
+  const userId = req.userId!;
+  const email = req.userEmail;
+  if (!email) {
+    // Not reachable for email/password accounts (the only kind Phase 1 has).
+    console.error('Change password: authenticated user has no email:', userId);
+    return res.status(500).json({
+      error: 'Failed to change password',
+      status: 500,
+    });
+  }
+
+  try {
+    const client = createIsolatedAuthClient();
+    const { data: signInData, error: signInError } = await client.auth.signInWithPassword({
+      email,
+      password: currentPassword,
+    });
+
+    if (signInError) {
+      const code = (signInError as { code?: string }).code;
+      if (code === 'invalid_credentials' || signInError.message?.includes('Invalid login credentials')) {
+        return res.status(400).json({
+          error: WRONG_CURRENT_PASSWORD_MESSAGE,
+          status: 400,
+        });
+      }
+      console.error('Change password: verifying current password failed:', signInError);
+      return res.status(500).json({
+        error: 'Failed to change password',
+        status: 500,
+      });
+    }
+
+    if (!signInData.user || signInData.user.id !== userId) {
+      // Should be impossible (the email came from this user's token) — refuse
+      // rather than change a password we can't tie to the caller.
+      console.error('Change password: verified user does not match token user:', userId);
+      return res.status(500).json({
+        error: 'Failed to change password',
+        status: 500,
+      });
+    }
+
+    if (signInData.session) {
+      // Best-effort: drop the throwaway session the verification created.
+      const { error: signOutError } = await client.auth.admin.signOut(
+        signInData.session.access_token,
+        'local'
+      );
+      if (signOutError) {
+        console.warn('Change password: could not revoke verification session:', signOutError.message);
+      }
+    }
+
+    const { error: updateError } = await supabase.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+
+    if (updateError) {
+      const code = (updateError as { code?: string }).code;
+      // User-correctable rejections from Supabase's own password policy.
+      if (code === 'same_password' || code === 'weak_password') {
+        return res.status(400).json({
+          error: updateError.message,
+          status: 400,
+        });
+      }
+      console.error('Change password: updateUserById failed:', updateError);
+      return res.status(500).json({
+        error: 'Failed to change password',
+        status: 500,
+      });
+    }
+
+    return res.status(200).json({ message: 'Password updated' });
+  } catch (err) {
+    console.error('Change password error:', err);
     return res.status(500).json({
       error: 'Internal server error',
       status: 500,

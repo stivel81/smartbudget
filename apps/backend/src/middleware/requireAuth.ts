@@ -3,6 +3,8 @@ import { supabaseAuth } from '@smartbudget/shared/lib/supabaseAuth';
 
 export interface AuthedRequest extends Request {
   userId?: string;
+  /** Email of the authenticated user, as returned by Supabase for the token. */
+  userEmail?: string;
 }
 
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -19,5 +21,6 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   }
 
   req.userId = data.user.id;
+  req.userEmail = data.user.email ?? undefined;
   next();
 }

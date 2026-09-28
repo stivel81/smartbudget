@@ -20,6 +20,10 @@ import {
   mockUpdateUser,
   createIsolatedAuthClient,
   isolatedClients,
+  mockIsolatedSignIn,
+  mockIsolatedAdminSignOut,
+  mockUpdateUserById,
+  mockGetUser,
 } from '../testUtils/supabaseMock';
 
 beforeEach(() => {
@@ -547,5 +551,268 @@ describe('POST /api/v1/auth/reset-password', () => {
 
     expect(response.status).toBe(200);
     expect(mockUpdateUser).toHaveBeenCalledWith({ password: '12345678' });
+  });
+});
+
+describe('POST /api/v1/auth/change-password', () => {
+  const validBody = { currentPassword: 'oldpassword123', newPassword: 'newpassword456' };
+  // requireAuth's mock resolves 'valid-token' to this user.
+  const tokenUser = { id: 'user-123', email: 'user@example.com' };
+  let errorSpy: jest.SpyInstance;
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    isolatedClients.length = 0;
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  function post(body: unknown, token: string | null = 'valid-token') {
+    const req = request(app).post('/api/v1/auth/change-password');
+    if (token) req.set('Authorization', `Bearer ${token}`);
+    return req.send(body as object);
+  }
+
+  function mockCurrentPasswordOk(user: { id: string; email: string } = tokenUser) {
+    mockIsolatedSignIn.mockResolvedValueOnce({
+      data: { session: { access_token: 'verify-access', refresh_token: 'verify-refresh' }, user },
+      error: null,
+    });
+  }
+
+  function mockWrongCurrentPassword() {
+    mockIsolatedSignIn.mockResolvedValueOnce({
+      data: { session: null, user: null },
+      error: { message: 'Invalid login credentials', status: 400, code: 'invalid_credentials' },
+    });
+  }
+
+  it('verifies the current password, updates it via the admin API, and returns 200', async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: 'Password updated' });
+    // Email comes from the verified token, never from the request body.
+    expect(mockIsolatedSignIn).toHaveBeenCalledWith({ email: 'user@example.com', password: 'oldpassword123' });
+    expect(mockUpdateUserById).toHaveBeenCalledTimes(1);
+    expect(mockUpdateUserById).toHaveBeenCalledWith('user-123', { password: 'newpassword456' });
+  });
+
+  it('ignores an email supplied in the body (cannot target another account)', async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    const response = await post({ ...validBody, email: 'victim@example.com', userId: 'victim-id' });
+
+    expect(response.status).toBe(200);
+    expect(mockIsolatedSignIn).toHaveBeenCalledWith({ email: 'user@example.com', password: 'oldpassword123' });
+    expect(mockUpdateUserById).toHaveBeenCalledWith('user-123', { password: 'newpassword456' });
+  });
+
+  it('verifies on one fresh isolated client per request, never the shared auth client', async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    await post(validBody);
+    await post(validBody);
+
+    expect(createIsolatedAuthClient).toHaveBeenCalledTimes(2);
+    expect(isolatedClients).toHaveLength(2);
+    expect(isolatedClients[0]).not.toBe(isolatedClients[1]);
+    for (const client of isolatedClients) {
+      expect(client.auth.signInWithPassword).toHaveBeenCalledTimes(1);
+    }
+    expect(mockSignInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it("revokes only the verification session (scope 'local'), not the user's other sessions", async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    await post(validBody);
+
+    expect(mockIsolatedAdminSignOut).toHaveBeenCalledWith('verify-access', 'local');
+    expect(mockAdminSignOut).not.toHaveBeenCalled();
+  });
+
+  it('still changes the password when revoking the verification session fails', async () => {
+    mockCurrentPasswordOk();
+    mockIsolatedAdminSignOut.mockResolvedValueOnce({ data: {}, error: { message: 'nope' } });
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateUserById).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('skips the revoke call when sign-in returned no session', async () => {
+    mockIsolatedSignIn.mockResolvedValueOnce({ data: { session: null, user: tokenUser }, error: null });
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(200);
+    expect(mockIsolatedAdminSignOut).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 "Current password is incorrect" for a wrong current password, and does not update', async () => {
+    mockWrongCurrentPassword();
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Current password is incorrect', status: 400 });
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('recognises a wrong password by message alone (older GoTrue without error codes)', async () => {
+    mockIsolatedSignIn.mockResolvedValueOnce({
+      data: { session: null, user: null },
+      error: { message: 'Invalid login credentials', status: 400 },
+    });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Current password is incorrect');
+  });
+
+  it('returns 500 (not "incorrect password") when verification fails for another reason', async () => {
+    mockIsolatedSignIn.mockResolvedValueOnce({
+      data: { session: null, user: null },
+      error: { message: 'Service unavailable', status: 503 },
+    });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Failed to change password', status: 500 });
+    expect(response.body.error).not.toMatch(/unavailable/i);
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 and does not update when the verified user is not the token user', async () => {
+    mockCurrentPasswordOk({ id: 'someone-else', email: 'user@example.com' });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(500);
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the token user has no email', async () => {
+    mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'user-123' } }, error: null });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(500);
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the new password equals the current one, without calling Supabase', async () => {
+    const response = await post({ currentPassword: 'samepassword1', newPassword: 'samepassword1' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('New password must be different from your current password');
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('rejects a new password that breaks the signup rules, with the exact signup message', async () => {
+    const signupRes = await request(app)
+      .post('/api/v1/auth/signup')
+      .send({ email: 'a@b.com', password: 'short', name: 'A' });
+    const response = await post({ ...validBody, newPassword: 'short' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Password must be at least 8 characters long');
+    expect(response.body.error).toBe(signupRes.body.error);
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
+  });
+
+  it('accepts a new password of exactly the minimum length', async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: tokenUser }, error: null });
+
+    const response = await post({ ...validBody, newPassword: '12345678' });
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ['missing currentPassword', { newPassword: 'newpassword456' }],
+    ['missing newPassword', { currentPassword: 'oldpassword123' }],
+    ['empty currentPassword', { currentPassword: '', newPassword: 'newpassword456' }],
+    ['empty newPassword', { currentPassword: 'oldpassword123', newPassword: '' }],
+    ['non-string currentPassword', { currentPassword: 12345678, newPassword: 'newpassword456' }],
+    ['non-string newPassword', { currentPassword: 'oldpassword123', newPassword: ['x'] }],
+  ])('returns 400 for %s', async (_label, body) => {
+    const response = await post(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Missing required fields: currentPassword, newPassword');
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['same_password', 'New password should be different from the old password.'],
+    ['weak_password', 'Password is known to be weak and easy to guess'],
+  ])('passes through Supabase %s rejections as 400', async (code, message) => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: null }, error: { message, code, status: 422 } });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe(message);
+  });
+
+  it('returns 500 when the admin update fails', async () => {
+    mockCurrentPasswordOk();
+    mockUpdateUserById.mockResolvedValueOnce({ data: { user: null }, error: { message: 'db down', status: 500 } });
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Failed to change password', status: 500 });
+  });
+
+  it('returns 500 when Supabase throws', async () => {
+    mockIsolatedSignIn.mockRejectedValueOnce(new Error('network'));
+
+    const response = await post(validBody);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: 'Internal server error', status: 500 });
+  });
+
+  it('returns 401 without an Authorization header', async () => {
+    const response = await post(validBody, null);
+
+    expect(response.status).toBe(401);
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for an invalid token', async () => {
+    const response = await post(validBody, 'bad-token');
+
+    expect(response.status).toBe(401);
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
+    expect(mockUpdateUserById).not.toHaveBeenCalled();
   });
 });
