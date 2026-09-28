@@ -26,7 +26,7 @@ pnpm-debug.log*
 *.log
 
 # Expo / React Native (apps/mobile)
-apps/mobile/.expo/
+.expo/
 apps/mobile/.expo-shared/
 apps/mobile/dist/
 apps/mobile/web-build/
