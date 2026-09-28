@@ -1,7 +1,10 @@
 import {
   HAIKU_INPUT_COST_PER_TOKEN,
   HAIKU_OUTPUT_COST_PER_TOKEN,
+  apiCallsToday,
   avgCostPerScan,
+  failedScansToday,
+  usageFraction,
   claudeCostUsd,
   countNewSince,
   donutDashOffset,
@@ -129,6 +132,46 @@ describe('monthCostUsd', () => {
 
   it('returns 0 with no usage', () => {
     expect(monthCostUsd([], NOW)).toBe(0);
+  });
+});
+
+describe('failedScansToday / apiCallsToday', () => {
+  const log = [
+    { status: 'failed' as const, createdAt: '2026-03-04T00:00:00Z' },
+    { status: 'failed' as const, createdAt: '2026-03-04T23:59:59Z' },
+    { status: 'success' as const, createdAt: '2026-03-04T12:00:00Z' }, // counted via byDay, not here
+    { status: 'failed' as const, createdAt: '2026-03-03T23:59:59Z' }, // yesterday
+    { status: 'failed' as const, createdAt: '2026-03-04T20:00:00-05:00' }, // = 03-05 01:00Z, tomorrow UTC
+  ];
+  const byDay = [
+    { date: '2026-03-04', scans: 7, inputTokens: 0, outputTokens: 0 },
+    { date: '2026-03-03', scans: 9, inputTokens: 0, outputTokens: 0 },
+  ];
+
+  it("counts only today's (UTC) failures", () => {
+    expect(failedScansToday(log, NOW)).toBe(2);
+    expect(failedScansToday([], NOW)).toBe(0);
+  });
+
+  it('adds successful scans (from usage) and failures (from the log)', () => {
+    expect(apiCallsToday(byDay, log, NOW)).toEqual({ successful: 7, failed: 2, total: 9 });
+  });
+
+  it('is zero with no data', () => {
+    expect(apiCallsToday([], [], NOW)).toEqual({ successful: 0, failed: 0, total: 0 });
+  });
+});
+
+describe('usageFraction', () => {
+  it('divides used by limit and can exceed 1', () => {
+    expect(usageFraction(25, 50)).toBe(0.5);
+    expect(usageFraction(3000, 2000)).toBe(1.5);
+    expect(usageFraction(0, 50)).toBe(0);
+  });
+
+  it('is 0 for a non-positive limit', () => {
+    expect(usageFraction(10, 0)).toBe(0);
+    expect(usageFraction(10, -5)).toBe(0);
   });
 });
 

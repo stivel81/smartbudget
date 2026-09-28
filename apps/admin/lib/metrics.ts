@@ -5,7 +5,7 @@
 // that depends on "now" takes it as a parameter so it can be tested with fixed
 // dates.
 
-import type { AdminUserSummary, DailyUsage } from './api';
+import type { AdminUserSummary, DailyUsage, ScanLogEntry } from './api';
 
 // Claude Haiku 4.5 pricing — keep in sync with apps/backend/src/routes/admin.ts.
 export const HAIKU_INPUT_COST_PER_TOKEN = 1 / 1_000_000;
@@ -63,6 +63,35 @@ export function monthCostUsd(byDay: DailyUsage[], now: Date): number {
   return byDay
     .filter((d) => d.date.startsWith(month))
     .reduce((sum, d) => sum + claudeCostUsd(d.inputTokens, d.outputTokens), 0);
+}
+
+/**
+ * Failed scan attempts on the current UTC day, from the /admin/scan-log feed.
+ * Caveat: that feed is the newest 100 events (successes + failures), so on a
+ * day with more than ~100 scans this can undercount failures.
+ */
+export function failedScansToday(log: Pick<ScanLogEntry, 'status' | 'createdAt'>[], now: Date): number {
+  const today = isoDay(now);
+  return log.filter((e) => e.status === 'failed' && isoDay(new Date(e.createdAt)) === today).length;
+}
+
+/**
+ * Claude API calls today: successful scans (exact, from /admin/usage) plus
+ * failed attempts (from the scan log — see failedScansToday).
+ */
+export function apiCallsToday(
+  byDay: DailyUsage[],
+  log: Pick<ScanLogEntry, 'status' | 'createdAt'>[],
+  now: Date
+): { successful: number; failed: number; total: number } {
+  const successful = todayUsage(byDay, now).scans;
+  const failed = failedScansToday(log, now);
+  return { successful, failed, total: successful + failed };
+}
+
+/** `used / limit` as a fraction (may exceed 1); 0 when the limit isn't positive. */
+export function usageFraction(used: number, limit: number): number {
+  return limit > 0 ? used / limit : 0;
 }
 
 /** Average cost per scan, 0 when there were no scans. */

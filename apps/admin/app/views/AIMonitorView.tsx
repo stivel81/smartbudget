@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { getUsage, getScanLog, ScanLogEntry, UsageSummary } from '../../lib/api';
 import { COLORS, FONT_FAMILY } from '../../lib/theme';
-import { avgCostPerScan, todayUsage } from '../../lib/metrics';
+import { apiCallsToday, avgCostPerScan, monthCostUsd, todayUsage, usageFraction } from '../../lib/metrics';
+import { CLAUDE_DAILY_CALL_LIMIT, CLAUDE_MONTHLY_BUDGET_USD } from '../../lib/config';
 import {
   Card,
   CardHeader,
   MetricCard,
+  ProgressBar,
   StatusDot,
   Td,
   Th,
@@ -56,8 +58,16 @@ export default function AIMonitorView({ accessToken }: { accessToken: string }) 
   if (error) return <p style={{ fontFamily: FONT_FAMILY, fontSize: 13, color: COLORS.dangerText }}>{error}</p>;
   if (!usage) return null;
 
-  const { scans: scansToday, costUsd: costToday } = todayUsage(usage.byDay, new Date());
+  const now = new Date();
+  const { scans: scansToday, costUsd: costToday } = todayUsage(usage.byDay, now);
   const avgPerScan = avgCostPerScan(costToday, scansToday);
+  const calls = apiCallsToday(usage.byDay, log, now);
+  const monthCost = monthCostUsd(usage.byDay, now);
+  const budgetUsed = usageFraction(monthCost, CLAUDE_MONTHLY_BUDGET_USD);
+  const callsUsed = usageFraction(calls.total, CLAUDE_DAILY_CALL_LIMIT);
+  const budgetLabel = `$${CLAUDE_MONTHLY_BUDGET_USD.toFixed(2)} budget`;
+  const limitLabel = `${CLAUDE_DAILY_CALL_LIMIT.toLocaleString('en-US')} daily limit`;
+  const captionStyle = { margin: '6px 0 0', fontFamily: FONT_FAMILY, fontSize: 10 };
 
   return (
     <div>
@@ -65,8 +75,27 @@ export default function AIMonitorView({ accessToken }: { accessToken: string }) 
       <p style={pageSubtitleStyle}>Claude Haiku 4.5 — live usage &amp; costs</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 18 }}>
-        <MetricCard label="All-time cost" value={`$${usage.estimatedCostUsd.toFixed(2)}`} accent />
-        <MetricCard label="API calls today" value={scansToday.toString()} />
+        <MetricCard
+          label="Month cost"
+          value={`$${monthCost.toFixed(2)}`}
+          change={{ label: `${budgetUsed > 1 ? 'over' : 'of'} ${budgetLabel}`, positive: budgetUsed <= 1 }}
+          accent
+        >
+          <ProgressBar value={budgetUsed} label="Monthly budget used" onAccent />
+          <p style={{ ...captionStyle, color: 'rgba(255,255,255,0.7)' }}>
+            ${usage.estimatedCostUsd.toFixed(2)} all-time
+          </p>
+        </MetricCard>
+        <MetricCard
+          label="API calls today"
+          value={calls.total.toLocaleString('en-US')}
+          change={{ label: `${callsUsed > 1 ? 'over' : 'of'} ${limitLabel}`, positive: callsUsed <= 1 }}
+        >
+          <ProgressBar value={callsUsed} label="Daily call limit used" />
+          {calls.failed > 0 && (
+            <p style={{ ...captionStyle, color: COLORS.dangerText }}>{calls.failed} failed</p>
+          )}
+        </MetricCard>
         <MetricCard
           label="Cost today"
           value={`$${costToday.toFixed(4)}`}

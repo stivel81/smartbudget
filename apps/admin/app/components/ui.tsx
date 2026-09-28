@@ -118,11 +118,14 @@ export function MetricCard({
   value,
   change,
   accent,
+  children,
 }: {
   label: string;
   value: string;
   change?: { label: string; positive: boolean };
   accent?: boolean;
+  /** Extra content under the value, e.g. a ProgressBar. */
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -171,6 +174,40 @@ export function MetricCard({
           {change.label}
         </p>
       )}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Usage progress bar per the design spec: 4px, #f3f4f6 track, purple fill
+ * (translucent white on the accent card). `value` is a 0–1 fraction, clamped.
+ */
+export function ProgressBar({ value, label, onAccent }: { value: number; label: string; onAccent?: boolean }) {
+  const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct}
+      style={{
+        marginTop: 8,
+        height: 4,
+        borderRadius: 2,
+        background: onAccent ? 'rgba(255,255,255,0.2)' : COLORS.dividerLight,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          width: `${pct}%`,
+          height: '100%',
+          borderRadius: 2,
+          background: onAccent ? 'rgba(255,255,255,0.8)' : COLORS.purple,
+        }}
+      />
     </div>
   );
 }

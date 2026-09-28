@@ -48,9 +48,53 @@ describe('AIMonitorView', () => {
     mocked.getScanLog.mockResolvedValue({ log: [] });
     render(<AIMonitorView accessToken="tok" />);
     expect(await screen.findByText('No scan activity yet.')).toBeInTheDocument();
+    expect(metricValue('Month cost')).toBe('$0.00');
+    expect(screen.getByText('of $50.00 budget')).toBeInTheDocument();
+    expect(screen.getByText('$0.00 all-time')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Monthly budget used' })).toHaveAttribute('aria-valuenow', '0');
     expect(metricValue('API calls today')).toBe('0');
+    expect(screen.getByText('of 2,000 daily limit')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Daily call limit used' })).toHaveAttribute('aria-valuenow', '0');
+    expect(screen.queryByText(/failed$/)).not.toBeInTheDocument();
     expect(metricValue('Cost today')).toBe('$0.0000');
     expect(screen.queryByText(/per scan/)).not.toBeInTheDocument();
+  });
+
+  it('replaces the all-time hero with month cost vs budget (spec usage cards)', async () => {
+    mocked.getUsage.mockResolvedValue(
+      makeUsage({
+        estimatedCostUsd: 40,
+        byDay: [
+          { date: '2026-03-02', scans: 100, inputTokens: 10_000_000, outputTokens: 0 }, // $10
+          { date: '2026-03-01', scans: 100, inputTokens: 0, outputTokens: 500_000 }, // $2.50
+          { date: '2026-02-28', scans: 100, inputTokens: 20_000_000, outputTokens: 0 }, // Feb — not this month
+        ],
+      })
+    );
+    mocked.getScanLog.mockResolvedValue({ log: [] });
+    render(<AIMonitorView accessToken="tok" />);
+    await screen.findByRole('heading', { name: 'AI Monitor' });
+    expect(screen.queryByText('All-time cost')).not.toBeInTheDocument();
+    expect(metricValue('Month cost')).toBe('$12.50');
+    expect(screen.getByText('of $50.00 budget')).toBeInTheDocument();
+    expect(screen.getByText('$40.00 all-time')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Monthly budget used' })).toHaveAttribute('aria-valuenow', '25');
+  });
+
+  it('flags month cost over budget and calls over the daily limit', async () => {
+    mocked.getUsage.mockResolvedValue(
+      makeUsage({
+        byDay: [{ date: '2026-03-04', scans: 2500, inputTokens: 60_000_000, outputTokens: 0 }], // $60, 2,500 calls
+      })
+    );
+    mocked.getScanLog.mockResolvedValue({ log: [] });
+    render(<AIMonitorView accessToken="tok" />);
+    await screen.findByRole('heading', { name: 'AI Monitor' });
+    expect(screen.getByText('over $50.00 budget')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Monthly budget used' })).toHaveAttribute('aria-valuenow', '100');
+    expect(metricValue('API calls today')).toBe('2,500');
+    expect(screen.getByText('over 2,000 daily limit')).toHaveStyle({ color: '#dc2626' });
+    expect(screen.getByRole('progressbar', { name: 'Daily call limit used' })).toHaveAttribute('aria-valuenow', '100');
   });
 
   it("renders today's usage and the API log", async () => {
@@ -81,7 +125,9 @@ describe('AIMonitorView', () => {
     render(<AIMonitorView accessToken="tok" />);
     await screen.findByRole('heading', { name: 'AI Monitor' });
     expect(screen.getByText('Claude Haiku 4.5 — live usage & costs')).toBeInTheDocument();
-    expect(metricValue('API calls today')).toBe('4');
+    // 4 successful (usage) + 1 failed today (scan log)
+    expect(metricValue('API calls today')).toBe('5');
+    expect(screen.getByText('1 failed')).toBeInTheDocument();
     expect(metricValue('Cost today')).toBe('$0.0080');
     expect(screen.getByText('avg $0.0020 per scan')).toBeInTheDocument();
 

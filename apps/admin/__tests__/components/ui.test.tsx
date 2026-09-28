@@ -7,6 +7,7 @@ import {
   CardHeader,
   FilterPill,
   MetricCard,
+  ProgressBar,
   StatusDot,
   Td,
   Th,
@@ -94,6 +95,42 @@ describe('MetricCard', () => {
     expect(screen.getByText('up')).toHaveStyle({ color: '#a7f3d0' });
   });
 
+});
+
+describe('MetricCard children', () => {
+  it('renders children (e.g. a progress bar) below the value', () => {
+    render(
+      <MetricCard label="L" value="1">
+        <span>extra</span>
+      </MetricCard>
+    );
+    expect(screen.getByText('extra')).toBeInTheDocument();
+  });
+});
+
+describe('ProgressBar', () => {
+  it('fills to the given fraction as an accessible progressbar', () => {
+    render(<ProgressBar value={0.25} label="Budget used" />);
+    const bar = screen.getByRole('progressbar', { name: 'Budget used' });
+    expect(bar).toHaveAttribute('aria-valuenow', '25');
+    expect(bar).toHaveAttribute('aria-valuemin', '0');
+    expect(bar).toHaveAttribute('aria-valuemax', '100');
+    expect(bar).toHaveStyle({ height: '4px', background: COLORS.dividerLight });
+    expect(bar.firstElementChild).toHaveStyle({ width: '25%', background: COLORS.purple });
+  });
+
+  it('clamps to 0–100%', () => {
+    const { rerender } = render(<ProgressBar value={3} label="p" />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveStyle({ width: '100%' });
+    rerender(<ProgressBar value={-1} label="p" />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('uses a translucent white fill on the accent card', () => {
+    render(<ProgressBar value={0.5} label="p" onAccent />);
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveStyle({ background: 'rgba(255,255,255,0.8)' });
+  });
 });
 
 describe('StatusDot', () => {
