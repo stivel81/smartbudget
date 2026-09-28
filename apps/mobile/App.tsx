@@ -30,7 +30,8 @@ function BottomTabNavigator() {
   return (
     <Tab.Navigator
       screenOptions={{
-        headerShown: true,
+        // Every tab screen draws its own V2 header (title, greeting/month, actions).
+        headerShown: false,
         tabBarActiveTintColor: COLORS.textPrimary,
         tabBarInactiveTintColor: COLORS.placeholder,
         tabBarStyle: {
@@ -56,8 +57,6 @@ function BottomTabNavigator() {
         component={ScanScreen}
         options={{
           title: 'Scan Receipt',
-          // ScanScreen draws its own dark top bar (title + Cancel) per the V2 spec.
-          headerShown: false,
           tabBarLabel: 'Scan',
           tabBarIcon: ({ color, size }) => (
             <Feather name="camera" size={size} color={color} />
