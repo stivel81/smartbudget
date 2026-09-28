@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { getUsage, getScanLog, ScanLogEntry, UsageSummary } from '../../lib/api';
 import { COLORS, FONT_FAMILY } from '../../lib/theme';
+import { avgCostPerScan, todayUsage } from '../../lib/metrics';
 import {
   Card,
   CardHeader,
@@ -15,13 +16,6 @@ import {
   pageSubtitleStyle,
   pageTitleStyle,
 } from '../components/ui';
-
-const HAIKU_INPUT_COST_PER_TOKEN = 1 / 1_000_000;
-const HAIKU_OUTPUT_COST_PER_TOKEN = 5 / 1_000_000;
-
-function isoDay(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -62,13 +56,8 @@ export default function AIMonitorView({ accessToken }: { accessToken: string }) 
   if (error) return <p style={{ fontFamily: FONT_FAMILY, fontSize: 13, color: COLORS.dangerText }}>{error}</p>;
   if (!usage) return null;
 
-  const today = isoDay(new Date());
-  const todayEntry = usage.byDay.find((d) => d.date === today);
-  const scansToday = todayEntry?.scans ?? 0;
-  const costToday = todayEntry
-    ? todayEntry.inputTokens * HAIKU_INPUT_COST_PER_TOKEN + todayEntry.outputTokens * HAIKU_OUTPUT_COST_PER_TOKEN
-    : 0;
-  const avgPerScan = scansToday > 0 ? costToday / scansToday : 0;
+  const { scans: scansToday, costUsd: costToday } = todayUsage(usage.byDay, new Date());
+  const avgPerScan = avgCostPerScan(costToday, scansToday);
 
   return (
     <div>

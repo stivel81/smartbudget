@@ -9,24 +9,15 @@ import {
   UsageSummary,
 } from '../../lib/api';
 import { COLORS, FONT_FAMILY } from '../../lib/theme';
+import {
+  countNewSince,
+  donutDashOffset,
+  monthCostUsd,
+  signupsByDay as computeSignupsByDay,
+  successRatePercent,
+  todayUsage,
+} from '../../lib/metrics';
 import { Avatar, Badge, Card, CardHeader, MetricCard, Td, Th, tableStyle, tableWrapStyle, pageSubtitleStyle, pageTitleStyle } from '../components/ui';
-
-const HAIKU_INPUT_COST_PER_TOKEN = 1 / 1_000_000;
-const HAIKU_OUTPUT_COST_PER_TOKEN = 5 / 1_000_000;
-
-function isoDay(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
-function last7Days(): string[] {
-  const days: string[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(isoDay(d));
-  }
-  return days;
-}
 
 function BarChart({ data }: { data: { day: string; count: number }[] }) {
   const max = Math.max(1, ...data.map((d) => d.count));
@@ -56,10 +47,9 @@ function BarChart({ data }: { data: { day: string; count: number }[] }) {
 }
 
 function Donut({ successCount, failedCount }: { successCount: number; failedCount: number }) {
-  const total = successCount + failedCount;
-  const pct = total > 0 ? Math.round((successCount / total) * 100) : 100;
+  const pct = successRatePercent(successCount, failedCount);
   const circumference = 2 * Math.PI * 30;
-  const offset = circumference * (1 - pct / 100);
+  const offset = donutDashOffset(pct, 30);
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 70 }}>
       <svg width="76" height="76" viewBox="0 0 76 76">
@@ -119,24 +109,11 @@ export default function DashboardView({ accessToken }: { accessToken: string }) 
   if (error) return <p style={{ fontFamily: FONT_FAMILY, fontSize: 13, color: COLORS.dangerText }}>{error}</p>;
   if (!usage) return null;
 
-  const today = isoDay(new Date());
-  const scansToday = usage.byDay.find((d) => d.date === today)?.scans ?? 0;
-
-  const currentMonth = today.slice(0, 7);
-  const monthDays = usage.byDay.filter((d) => d.date.startsWith(currentMonth));
-  const monthInputTokens = monthDays.reduce((sum, d) => sum + d.inputTokens, 0);
-  const monthOutputTokens = monthDays.reduce((sum, d) => sum + d.outputTokens, 0);
-  const monthCostUsd = monthInputTokens * HAIKU_INPUT_COST_PER_TOKEN + monthOutputTokens * HAIKU_OUTPUT_COST_PER_TOKEN;
-
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  const newThisWeek = users.filter((u) => new Date(u.created_at) >= weekAgo).length;
-
-  const days = last7Days();
-  const signupsByDay = days.map((day) => ({
-    day,
-    count: users.filter((u) => u.created_at.slice(0, 10) === day).length,
-  }));
+  const now = new Date();
+  const scansToday = todayUsage(usage.byDay, now).scans;
+  const monthCost = monthCostUsd(usage.byDay, now);
+  const newThisWeek = countNewSince(users, now, 7);
+  const signupsByDay = computeSignupsByDay(users, now, 7);
 
   const recent = users.slice(0, 4);
 
@@ -146,7 +123,7 @@ export default function DashboardView({ accessToken }: { accessToken: string }) 
       <p style={pageSubtitleStyle}>Overview of accounts and Claude usage across SmartBudget.</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 18 }}>
-        <MetricCard label="This month's Claude spend" value={`$${monthCostUsd.toFixed(2)}`} accent />
+        <MetricCard label="This month's Claude spend" value={`$${monthCost.toFixed(2)}`} accent />
         <MetricCard label="Total users" value={users.length.toLocaleString()} />
         <MetricCard
           label="New signups (7d)"

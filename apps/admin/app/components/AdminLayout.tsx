@@ -92,6 +92,7 @@ function IconBell({ hasAlert }: { hasAlert: boolean }) {
       </svg>
       {hasAlert && (
         <span
+          data-testid="bell-alert-dot"
           style={{
             position: 'absolute',
             top: -1,
@@ -162,6 +163,7 @@ function NavLink({
         {icon}
         {alert && (
           <span
+            data-testid={`nav-alert-dot-${label}`}
             style={{
               position: 'absolute',
               top: -2,
