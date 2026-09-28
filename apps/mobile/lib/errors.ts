@@ -25,3 +25,15 @@ export function apiErrorMessage(err: unknown, networkFallback: string): string {
   }
   return networkFallback;
 }
+
+/** Backend error code (ApiError.errorCode) on login when the account's email isn't verified yet. */
+export const EMAIL_NOT_CONFIRMED = 'email_not_confirmed';
+
+/** True when a failed login means "right password, email not verified yet". */
+export function isEmailNotConfirmedError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    (err as { errorCode?: unknown }).errorCode === EMAIL_NOT_CONFIRMED
+  );
+}

@@ -9,11 +9,13 @@ import { Feather } from '@expo/vector-icons';
 import { logout as logoutApi, refreshSession as refreshSessionApi } from './lib/api';
 import { COLORS } from './lib/theme';
 import { AuthContext } from './lib/auth';
+import type { AuthStackParamList, SignedInStackParamList } from './lib/navigation';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
+import VerifyEmailScreen from './screens/VerifyEmailScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import BudgetScreen from './screens/BudgetScreen';
@@ -23,14 +25,7 @@ import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import HelpSupportScreen from './screens/HelpSupportScreen';
 
 const Tab = createBottomTabNavigator();
-const Stack = createNativeStackNavigator();
-
-type RootStackParamList = {
-  Login: undefined;
-  Signup: undefined;
-  ForgotPassword: { email?: string } | undefined;
-  Main: undefined;
-};
+const Stack = createNativeStackNavigator<AuthStackParamList & SignedInStackParamList>();
 
 function BottomTabNavigator() {
   return (
@@ -97,17 +92,19 @@ function BottomTabNavigator() {
 
 // Mobile never talks to Supabase directly — access tokens are exchanged
 // for a new session via POST /api/v1/auth/refresh (see lib/api.ts). Only
-// the long-lived refresh token (and email) are persisted; the access
+// the long-lived refresh token (and email, display name) are persisted; the access
 // token lives in memory only and is re-derived by refreshing on launch,
 // so a session restored from storage is never stale.
 const STORAGE_KEY_REFRESH_TOKEN = '@smartbudget/refreshToken';
 const STORAGE_KEY_EMAIL = '@smartbudget/userEmail';
+const STORAGE_KEY_NAME = '@smartbudget/userName';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
 
   // Restore a persisted session once on launch by exchanging the stored
@@ -123,11 +120,14 @@ export default function App() {
         setAccessToken(session.access_token);
         setRefreshToken(session.refresh_token);
         setUserEmail(session.user.email);
+        // The refreshed session carries the current name; an older backend
+        // doesn't send one, so fall back to the name persisted last time.
+        setUserName(session.user.name ?? (await AsyncStorage.getItem(STORAGE_KEY_NAME)));
         setIsAuthenticated(true);
       } catch {
         // Stored refresh token is invalid/expired/revoked — stay logged
         // out and clear it so future launches don't keep retrying it.
-        await AsyncStorage.multiRemove([STORAGE_KEY_REFRESH_TOKEN, STORAGE_KEY_EMAIL]);
+        await AsyncStorage.multiRemove([STORAGE_KEY_REFRESH_TOKEN, STORAGE_KEY_EMAIL, STORAGE_KEY_NAME]);
       } finally {
         setIsRestoring(false);
       }
@@ -154,6 +154,15 @@ export default function App() {
     }
   }, [userEmail, isRestoring]);
 
+  useEffect(() => {
+    if (isRestoring) return;
+    if (userName) {
+      AsyncStorage.setItem(STORAGE_KEY_NAME, userName);
+    } else {
+      AsyncStorage.removeItem(STORAGE_KEY_NAME);
+    }
+  }, [userName, isRestoring]);
+
   const logout = async () => {
     if (accessToken) {
       try {
@@ -166,6 +175,7 @@ export default function App() {
     setAccessToken(null);
     setRefreshToken(null);
     setUserEmail(null);
+    setUserName(null);
     setIsAuthenticated(false);
   };
 
@@ -189,6 +199,8 @@ export default function App() {
           setRefreshToken,
           userEmail,
           setUserEmail,
+          userName,
+          setUserName,
           logout,
         }}
       >
@@ -204,6 +216,7 @@ export default function App() {
                 <Stack.Screen name="Login" component={LoginScreen as any} />
                 <Stack.Screen name="Signup" component={SignupScreen as any} />
                 <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen as any} />
+                <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen as any} />
               </Stack.Group>
             ) : (
               // Main App Stack: tabs, plus screens pushed from Profile. Each

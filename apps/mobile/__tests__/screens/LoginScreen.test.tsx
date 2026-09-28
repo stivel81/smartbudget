@@ -22,6 +22,8 @@ function renderLogin(overrides: Partial<AuthContextType> = {}) {
     setRefreshToken: jest.fn(),
     userEmail: null,
     setUserEmail: jest.fn(),
+    userName: null,
+    setUserName: jest.fn(),
     logout: jest.fn(async () => {}),
     ...overrides,
   };
@@ -91,8 +93,79 @@ describe('LoginScreen', () => {
     expect(auth.setAccessToken).toHaveBeenCalledWith('access-tok');
     expect(auth.setRefreshToken).toHaveBeenCalledWith('refresh-tok');
     expect(auth.setUserEmail).toHaveBeenCalledWith('a@b.com');
+    expect(auth.setUserName).toHaveBeenCalledWith(null);
     // App.tsx swaps to the Main stack on isAuthenticated; no manual reset.
     expect(navigation.reset).not.toHaveBeenCalled();
+  });
+
+  it("stores the user's display name from the session", async () => {
+    mockLogin.mockResolvedValue({
+      session: {
+        access_token: 'access-tok',
+        refresh_token: 'refresh-tok',
+        user: { id: 'u1', email: 'a@b.com', name: 'Adrian Schtivelmager' },
+      },
+    });
+    const { auth } = renderLogin();
+
+    fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+    fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('login-button'));
+
+    await waitFor(() => expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true));
+    expect(auth.setUserName).toHaveBeenCalledWith('Adrian Schtivelmager');
+  });
+
+  describe('unverified email', () => {
+    const UNCONFIRMED = {
+      message: 'Please verify your email before signing in — enter the 6-digit code we emailed you.',
+      code: 401,
+      errorCode: 'email_not_confirmed',
+    };
+
+    it('routes to VerifyEmail with the trimmed email and asks it to send a fresh code', async () => {
+      mockLogin.mockRejectedValue(UNCONFIRMED);
+      const { navigation, auth } = renderLogin();
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), ' new@example.com ');
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+      fireEvent.press(screen.getByTestId('login-button'));
+
+      await waitFor(() => expect(navigation.navigate).toHaveBeenCalledTimes(1));
+      expect(navigation.navigate).toHaveBeenCalledWith('VerifyEmail', { email: 'new@example.com', sendCode: true });
+      await waitFor(() => expect(screen.getByTestId('login-button')).not.toBeDisabled());
+      expect(auth.setIsAuthenticated).not.toHaveBeenCalled();
+      // No error banner left behind on Login for when the user comes back.
+      expect(screen.queryByText(UNCONFIRMED.message)).toBeNull();
+      // The password is not kept around.
+      expect(screen.getByTestId('login-password-input').props.value).toBe('');
+    });
+
+    it('does not route to VerifyEmail for a wrong password (shows the error instead)', async () => {
+      mockLogin.mockRejectedValue({ message: 'Invalid email or password', code: 401 });
+      const { navigation } = renderLogin();
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'wrong');
+      fireEvent.press(screen.getByTestId('login-button'));
+
+      await waitFor(() => expect(screen.getByText('Invalid email or password')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('login-button')).not.toBeDisabled());
+      expect(navigation.navigate).not.toHaveBeenCalled();
+    });
+
+    it('does not route to VerifyEmail for a suspended account', async () => {
+      mockLogin.mockRejectedValue({ message: 'This account has been suspended.', code: 403 });
+      const { navigation } = renderLogin();
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+      fireEvent.press(screen.getByTestId('login-button'));
+
+      await waitFor(() => expect(screen.getByText('This account has been suspended.')).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId('login-button')).not.toBeDisabled());
+      expect(navigation.navigate).not.toHaveBeenCalled();
+    });
   });
 
   it('shows the backend error message on failed login', async () => {
@@ -174,5 +247,15 @@ describe('LoginScreen', () => {
 
     await waitFor(() => expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true));
     expect(mockLogin).toHaveBeenCalledWith('a@b.com', 'password123');
+  });
+
+  it('requires a password', async () => {
+    renderLogin();
+
+    fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+    fireEvent.press(screen.getByTestId('login-button'));
+
+    await waitFor(() => expect(screen.getByText('Password is required')).toBeTruthy());
+    expect(mockLogin).not.toHaveBeenCalled();
   });
 });

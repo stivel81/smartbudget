@@ -74,6 +74,8 @@ function renderBudget(accessToken: string | null = 'test-token') {
         setRefreshToken: () => {},
         userEmail: 'test@example.com',
         setUserEmail: () => {},
+        userName: null,
+        setUserName: () => {},
         logout: async () => {},
       }}
     >

@@ -23,6 +23,8 @@ export interface LoginResponse {
     user: {
       id: string;
       email: string;
+      /** Display name from signup (null/absent when none, or from an older backend). */
+      name?: string | null;
     };
   };
 }
@@ -42,7 +44,10 @@ export interface SignupResponse {
 
 export interface ApiError {
   message: string;
+  /** HTTP status. */
   code?: number | string;
+  /** Machine-readable backend error code, when the backend sends one (e.g. 'email_not_confirmed'). */
+  errorCode?: string;
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -56,10 +61,12 @@ export async function login(email: string, password: string): Promise<LoginRespo
 
   if (!response.ok) {
     const error = await response.json();
-    throw {
+    const apiError: ApiError = {
       message: error.error || 'Invalid credentials',
       code: response.status,
-    } as ApiError;
+    };
+    if (typeof error.code === 'string') apiError.errorCode = error.code;
+    throw apiError;
   }
 
   return response.json();
@@ -414,6 +421,60 @@ export async function changePassword(
     const error = await response.json();
     throw {
       message: error.error || 'Could not change password',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+export interface ResendSignupResponse {
+  message: string;
+}
+
+/**
+ * Confirm a new account with the 6-digit code from the signup email.
+ * Resolves with a session in the same shape as login(), so the caller can
+ * sign straight in. A wrong/expired code rejects with code 400.
+ */
+export async function verifySignup(email: string, code: string): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/verify-signup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, code }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Could not verify your email',
+      code: response.status,
+    } as ApiError;
+  }
+
+  return response.json();
+}
+
+/**
+ * Ask the backend to email a fresh signup code. The backend answers the same
+ * generic 200 whatever the account's state, so success does not mean an
+ * email was actually sent.
+ */
+export async function resendSignupCode(email: string): Promise<ResendSignupResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/auth/resend-signup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw {
+      message: error.error || 'Could not send a new code',
       code: response.status,
     } as ApiError;
   }

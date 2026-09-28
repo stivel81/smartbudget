@@ -1,4 +1,4 @@
-import { errorMessage, apiErrorMessage } from '../../lib/errors';
+import { errorMessage, apiErrorMessage, EMAIL_NOT_CONFIRMED, isEmailNotConfirmedError } from '../../lib/errors';
 
 describe('lib/errors — errorMessage', () => {
   it('returns an Error instance message', () => {
@@ -37,5 +37,27 @@ describe('lib/errors — apiErrorMessage', () => {
     ['a string', 'oops'],
   ])('uses the network fallback for %s', (_label, err) => {
     expect(apiErrorMessage(err, 'network')).toBe('network');
+  });
+});
+
+describe('lib/errors — isEmailNotConfirmedError', () => {
+  it("matches the backend's code", () => {
+    expect(EMAIL_NOT_CONFIRMED).toBe('email_not_confirmed');
+    expect(isEmailNotConfirmedError({ message: 'x', code: 401, errorCode: 'email_not_confirmed' })).toBe(true);
+  });
+
+  it.each([
+    ['wrong password', { message: 'Invalid email or password', code: 401 }],
+    ['another error code', { message: 'x', code: 403, errorCode: 'user_banned' }],
+    ['the status in errorCode', { message: 'x', code: 401, errorCode: 401 }],
+    ['the code as the HTTP status field', { message: 'x', code: 'email_not_confirmed' }],
+    ['only the message text', { message: 'Please verify your email before signing in' }],
+    ['an explicit undefined errorCode', { message: 'x', errorCode: undefined }],
+    ['a network error', new TypeError('Network request failed')],
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'email_not_confirmed'],
+  ])('is false for %s', (_label, err) => {
+    expect(isEmailNotConfirmedError(err)).toBe(false);
   });
 });

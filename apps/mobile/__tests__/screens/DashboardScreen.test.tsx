@@ -45,6 +45,8 @@ function renderDashboard(
         setRefreshToken: () => {},
         userEmail,
         setUserEmail: () => {},
+        userName: null,
+        setUserName: () => {},
         logout: async () => {},
       }}
     >

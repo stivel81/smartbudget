@@ -87,6 +87,8 @@ function authValue(overrides: Partial<AuthContextType> = {}): AuthContextType {
     setRefreshToken: () => {},
     userEmail: 'test@example.com',
     setUserEmail: () => {},
+    userName: null,
+    setUserName: () => {},
     logout: async () => {},
     ...overrides,
   };

@@ -246,3 +246,151 @@ describe('App Profile menu navigation (real navigator)', () => {
     errorSpy.mockRestore();
   });
 });
+
+describe('App signup email verification (real navigator)', () => {
+  afterEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  const VERIFIED_SESSION = {
+    session: {
+      access_token: 'verified-access',
+      refresh_token: 'verified-refresh',
+      user: { id: 'u9', email: 'adrian@example.com', name: 'Adrian Schtivelmager' },
+    },
+  };
+
+  function fetchCalls(fragment: string) {
+    return (global.fetch as jest.Mock).mock.calls.filter(([url]) => String(url).includes(fragment));
+  }
+
+  it('Signup -> Verify email (code) -> signed in on the Dashboard with the name, and persists it', async () => {
+    const errorSpy = jest.spyOn(console, 'error');
+    mockFetch({
+      '/api/v1/auth/signup': () => ({ ok: true, status: 201, json: async () => ({ user: { id: 'u9', email: 'adrian@example.com' } }) }),
+      '/api/v1/auth/verify-signup': () => okJson(VERIFIED_SESSION),
+      '/api/v1/receipts': () => okJson({ receipts: [] }),
+      '/api/v1/budgets': () => okJson({ budgets: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    fireEvent.press(screen.getByText('Sign up'));
+    await waitFor(() => expect(screen.getByTestId('signup-screen')).toBeTruthy());
+
+    fireEvent.changeText(screen.getByTestId('signup-firstname-input'), 'Adrian');
+    fireEvent.changeText(screen.getByTestId('signup-lastname-input'), 'Schtivelmager');
+    fireEvent.changeText(screen.getByTestId('signup-email-input'), 'adrian@example.com');
+    fireEvent.changeText(screen.getByTestId('signup-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('signup-button'));
+
+    await waitFor(() => expect(screen.getByTestId('verify-screen')).toBeTruthy());
+    expect(screen.queryByTestId('signup-screen')).toBeNull();
+    expect(screen.getByTestId('verify-email-address')).toHaveTextContent('adrian@example.com');
+    // Supabase already sent the code with the signup — no extra resend.
+    expect(fetchCalls('/auth/resend-signup')).toHaveLength(0);
+
+    fireEvent.changeText(screen.getByTestId('verify-code-input'), '123456');
+    fireEvent.press(screen.getByTestId('verify-button'));
+
+    await waitFor(() => expect(screen.getByText('My Finances')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.queryByTestId('verify-screen')).toBeNull();
+
+    const [, verifyInit] = fetchCalls('/auth/verify-signup')[0];
+    expect(JSON.parse(verifyInit.body)).toEqual({ email: 'adrian@example.com', code: '123456' });
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('verified-refresh')
+    );
+    await waitFor(async () =>
+      expect(await AsyncStorage.getItem('@smartbudget/userName')).toBe('Adrian Schtivelmager')
+    );
+    const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
+    expect(navErrors).toEqual([]);
+    errorSpy.mockRestore();
+  });
+
+  it('Login with an unverified email -> Verify email (fresh code sent) -> signed in', async () => {
+    const errorSpy = jest.spyOn(console, 'error');
+    mockFetch({
+      '/api/v1/auth/login': () =>
+        errJson(401, {
+          error: 'Please verify your email before signing in — enter the 6-digit code we emailed you.',
+          status: 401,
+          code: 'email_not_confirmed',
+        }),
+      '/api/v1/auth/resend-signup': () => okJson({ message: 'generic' }),
+      '/api/v1/auth/verify-signup': () => okJson(VERIFIED_SESSION),
+      '/api/v1/receipts': () => okJson({ receipts: [] }),
+      '/api/v1/budgets': () => okJson({ budgets: [] }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('login-email-input'), 'adrian@example.com');
+    fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('login-button'));
+
+    await waitFor(() => expect(screen.getByTestId('verify-screen')).toBeTruthy());
+    expect(screen.getByTestId('verify-email-address')).toHaveTextContent('adrian@example.com');
+    await waitFor(() => expect(screen.getByTestId('verify-notice')).toBeTruthy());
+    const resendCalls = fetchCalls('/auth/resend-signup');
+    expect(resendCalls).toHaveLength(1);
+    expect(JSON.parse(resendCalls[0][1].body)).toEqual({ email: 'adrian@example.com' });
+
+    fireEvent.changeText(screen.getByTestId('verify-code-input'), '654321');
+    fireEvent.press(screen.getByTestId('verify-button'));
+
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
+    expect(navErrors).toEqual([]);
+    errorSpy.mockRestore();
+  });
+
+  it('a wrong code keeps the user on Verify email, signed out', async () => {
+    mockFetch({
+      '/api/v1/auth/login': () => errJson(401, { error: 'verify', status: 401, code: 'email_not_confirmed' }),
+      '/api/v1/auth/resend-signup': () => okJson({ message: 'generic' }),
+      '/api/v1/auth/verify-signup': () => errJson(400, { error: 'Invalid or expired code', status: 400 }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('login-email-input'), 'adrian@example.com');
+    fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('login-button'));
+    await waitFor(() => expect(screen.getByTestId('verify-notice')).toBeTruthy());
+
+    fireEvent.changeText(screen.getByTestId('verify-code-input'), '000000');
+    fireEvent.press(screen.getByTestId('verify-button'));
+
+    await waitFor(() => expect(screen.getByText('Invalid or expired code')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('verify-button')).not.toBeDisabled());
+    expect(screen.queryByText('My Finances')).toBeNull();
+    expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull();
+  });
+
+  it('"Back to sign in" on Verify email returns to Login', async () => {
+    mockFetch({
+      '/api/v1/auth/signup': () => ({ ok: true, status: 201, json: async () => ({ user: { id: 'u9', email: 'a@b.com' } }) }),
+    });
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    fireEvent.press(screen.getByText('Sign up'));
+    await waitFor(() => expect(screen.getByTestId('signup-screen')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('signup-firstname-input'), 'A');
+    fireEvent.changeText(screen.getByTestId('signup-lastname-input'), 'B');
+    fireEvent.changeText(screen.getByTestId('signup-email-input'), 'a@b.com');
+    fireEvent.changeText(screen.getByTestId('signup-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('signup-button'));
+    await waitFor(() => expect(screen.getByTestId('verify-screen')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('verify-back-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('verify-screen')).toBeNull());
+    expect(screen.getByTestId('login-email-input')).toBeTruthy();
+    expect(screen.queryByTestId('signup-screen')).toBeNull();
+  });
+});

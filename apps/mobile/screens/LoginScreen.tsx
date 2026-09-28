@@ -14,18 +14,13 @@ import {
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { login } from '../lib/api';
+import { isEmailNotConfirmedError } from '../lib/errors';
 import { isValidEmail } from '../lib/validation';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, applySession } from '../lib/auth';
+import type { AuthStackParamList } from '../lib/navigation';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
-type RootStackParamList = {
-  Login: undefined;
-  Signup: undefined;
-  ForgotPassword: { email?: string } | undefined;
-  Main: undefined;
-};
-
-type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
+type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
@@ -55,18 +50,22 @@ export default function LoginScreen({ navigation }: Props) {
 
     setLoading(true);
 
+    const trimmedEmail = email.trim();
     try {
-      const result = await login(email.trim(), password);
+      const result = await login(trimmedEmail, password);
       // On success, set authentication state. App.tsx renders the Main
       // stack once isAuthenticated flips — a manual navigation.reset to
       // 'Main' here would fire before Main is registered ("not handled").
-      auth.setAccessToken(result.session.access_token);
-      auth.setRefreshToken(result.session.refresh_token);
-      auth.setUserEmail(result.session.user.email);
-      auth.setIsAuthenticated(true);
+      applySession(auth, result.session);
     } catch (err: any) {
-      setError(err.message || 'Login failed. Please try again.');
       setPassword('');
+      if (isEmailNotConfirmedError(err)) {
+        // Right password, unverified email: send them to enter the code,
+        // with a fresh one emailed (the signup one may have expired).
+        navigation.navigate('VerifyEmail', { email: trimmedEmail, sendCode: true });
+        return;
+      }
+      setError(err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -10,22 +10,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signup } from '../lib/api';
 import { validateEmail, validateNewPassword } from '../lib/validation';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
+import type { AuthStackParamList } from '../lib/navigation';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
-type RootStackParamList = {
-  Login: undefined;
-  Signup: undefined;
-  Main: undefined;
-};
-
-type Props = NativeStackScreenProps<RootStackParamList, 'Signup'>;
+type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 export default function SignupScreen({ navigation }: Props) {
   const [firstName, setFirstName] = useState('');
@@ -66,13 +60,11 @@ export default function SignupScreen({ navigation }: Props) {
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       const trimmedEmail = email.trim();
       await signup(trimmedEmail, password, fullName);
-      Alert.alert(
-        'Check your email',
-        `We sent a verification link to ${trimmedEmail}. Verify your email before signing in.`
-      );
+      // Supabase has just emailed a 6-digit code. Replace Signup (and the
+      // typed password) with Login + VerifyEmail, so "back" lands on Login.
       navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
+        index: 1,
+        routes: [{ name: 'Login' }, { name: 'VerifyEmail', params: { email: trimmedEmail } }],
       });
     } catch (err: any) {
       setError(err.message || 'Signup failed. Please try again.');

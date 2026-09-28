@@ -70,29 +70,35 @@ describe('SignupScreen', () => {
     expect(screen.getByText('Strong')).toBeTruthy();
   });
 
-  it('signs up, shows the verification alert, and navigates to Login on success', async () => {
+  it('signs up and replaces itself with Login + VerifyEmail for the new address', async () => {
     mockSignup.mockResolvedValue({ user: { id: 'u1', email: 'ada@example.com' } });
     const { navigation } = renderSignup();
     fillValidForm();
 
     fireEvent.press(screen.getByTestId('signup-button'));
 
-    await waitFor(() => expect(mockSignup).toHaveBeenCalledWith('ada@example.com', 'password123', 'Ada Lovelace'));
-    expect(alertSpy).toHaveBeenCalledWith(
-      'Check your email',
-      expect.stringContaining('ada@example.com')
-    );
-    expect(navigation.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Login' }] });
+    await waitFor(() => expect(navigation.reset).toHaveBeenCalledTimes(1));
+    expect(mockSignup).toHaveBeenCalledWith('ada@example.com', 'password123', 'Ada Lovelace');
+    expect(navigation.reset).toHaveBeenCalledWith({
+      index: 1,
+      routes: [{ name: 'Login' }, { name: 'VerifyEmail', params: { email: 'ada@example.com' } }],
+    });
+    // The code screen replaces the old "check your inbox for a link" alert.
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
-  it('shows the backend error message on failed signup', async () => {
+  it('shows the backend error message on failed signup and does not navigate', async () => {
     mockSignup.mockRejectedValue({ message: 'Email already registered' });
-    renderSignup();
+    const { navigation } = renderSignup();
     fillValidForm();
 
     fireEvent.press(screen.getByTestId('signup-button'));
 
     await waitFor(() => expect(screen.getByText('Email already registered')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('signup-button')).not.toBeDisabled());
+    expect(navigation.reset).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
   describe('V2 layout', () => {
@@ -144,12 +150,37 @@ describe('SignupScreen', () => {
 
   it('trims the email before signing up', async () => {
     mockSignup.mockResolvedValue({ user: { id: 'u1', email: 'ada@example.com' } });
-    renderSignup();
+    const { navigation } = renderSignup();
     fillValidForm();
     fireEvent.changeText(screen.getByTestId('signup-email-input'), ' ada@example.com ');
 
     fireEvent.press(screen.getByTestId('signup-button'));
 
     await waitFor(() => expect(mockSignup).toHaveBeenCalledWith('ada@example.com', 'password123', 'Ada Lovelace'));
+    await waitFor(() =>
+      expect(navigation.reset).toHaveBeenCalledWith({
+        index: 1,
+        routes: [{ name: 'Login' }, { name: 'VerifyEmail', params: { email: 'ada@example.com' } }],
+      })
+    );
+  });
+
+  it('requires a last name', async () => {
+    renderSignup();
+    fillValidForm();
+    fireEvent.changeText(screen.getByTestId('signup-lastname-input'), '   ');
+
+    fireEvent.press(screen.getByTestId('signup-button'));
+
+    await waitFor(() => expect(screen.getByText('Last name is required')).toBeTruthy());
+    expect(mockSignup).not.toHaveBeenCalled();
+  });
+
+  it('"Sign in" goes back to Login', () => {
+    const { navigation } = renderSignup();
+
+    fireEvent.press(screen.getByText('Sign in'));
+
+    expect(navigation.navigate).toHaveBeenCalledWith('Login');
   });
 });

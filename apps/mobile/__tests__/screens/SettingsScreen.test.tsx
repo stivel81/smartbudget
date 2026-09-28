@@ -40,6 +40,8 @@ function renderSettings(overrides: Partial<AuthContextType> = {}) {
     setRefreshToken: jest.fn(),
     userEmail: 'adrian@example.com',
     setUserEmail: jest.fn(),
+    userName: null,
+    setUserName: jest.fn(),
     logout: jest.fn(async () => {}),
     ...overrides,
   };

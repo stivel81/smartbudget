@@ -24,17 +24,11 @@ import {
 } from '../lib/validation';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 import OtpCodeInput from '../components/OtpCodeInput';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, applySession } from '../lib/auth';
+import type { AuthStackParamList } from '../lib/navigation';
 import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
-type RootStackParamList = {
-  Login: undefined;
-  Signup: undefined;
-  ForgotPassword: { email?: string } | undefined;
-  Main: undefined;
-};
-
-type Props = NativeStackScreenProps<RootStackParamList, 'ForgotPassword'>;
+type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 
 type Step = 'email' | 'reset';
 
@@ -130,12 +124,7 @@ export default function ForgotPasswordScreen({ navigation, route }: Props) {
     try {
       const result = await resetPassword(email, code, newPassword);
       // Sign straight in — same as LoginScreen does on a successful login.
-      // Flipping isAuthenticated makes App.tsx swap the auth stack for Main;
-      // no manual navigation (Main isn't registered until that re-render).
-      auth.setAccessToken(result.session.access_token);
-      auth.setRefreshToken(result.session.refresh_token);
-      auth.setUserEmail(result.session.user.email);
-      auth.setIsAuthenticated(true);
+      applySession(auth, result.session);
     } catch (err) {
       setError(apiErrorMessage(err, RESET_NETWORK_ERROR));
     } finally {

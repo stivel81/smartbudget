@@ -45,6 +45,8 @@ function renderForgot(params?: { email?: string }) {
     setRefreshToken: jest.fn(),
     userEmail: null,
     setUserEmail: jest.fn(),
+    userName: null,
+    setUserName: jest.fn(),
     logout: jest.fn(async () => {}),
   };
 
@@ -244,6 +246,20 @@ describe('ForgotPasswordScreen', () => {
       expect(codeInput.props.autoComplete).toBe('one-time-code');
     });
 
+    it("stores the user's display name from the reset session", async () => {
+      const { auth } = renderForgot();
+      await goToResetStep('a@b.com');
+      mockResetPassword.mockResolvedValueOnce({
+        session: { ...SESSION.session, user: { id: 'u1', email: 'a@b.com', name: 'Adrian Schtivelmager' } },
+      });
+
+      fillResetForm();
+      fireEvent.press(screen.getByTestId('forgot-reset-button'));
+
+      await waitFor(() => expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true));
+      expect(auth.setUserName).toHaveBeenCalledWith('Adrian Schtivelmager');
+    });
+
     it('requires the code', async () => {
       renderForgot();
       await goToResetStep();
@@ -331,6 +347,7 @@ describe('ForgotPasswordScreen', () => {
       expect(auth.setAccessToken).toHaveBeenCalledWith('new-access');
       expect(auth.setRefreshToken).toHaveBeenCalledWith('new-refresh');
       expect(auth.setUserEmail).toHaveBeenCalledWith('a@b.com');
+      expect(auth.setUserName).toHaveBeenCalledWith(null);
       // App.tsx swaps to the Main stack on isAuthenticated; no manual reset.
       expect(navigation.reset).not.toHaveBeenCalled();
     });
