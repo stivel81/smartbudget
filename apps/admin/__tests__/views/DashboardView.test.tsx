@@ -121,6 +121,18 @@ describe('DashboardView', () => {
     expect(screen.queryByText('eve@example.com')).not.toBeInTheDocument();
   });
 
+  it('uses real Claude spend as the hero metric and shows no billing/plan metrics (the product has no billing)', async () => {
+    setup({ users: [makeUser()], usage: makeUsage({ totalScans: 1 }) });
+    await screen.findByRole('heading', { name: 'Dashboard' });
+    const hero = screen.getByText("This month's Claude spend");
+    // Accent card label colour (white at 70%) marks the hero.
+    expect(hero).toHaveStyle({ color: 'rgba(255,255,255,0.7)' });
+    expect(screen.queryByText(/revenue/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/premium/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\bfree\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/₪/)).not.toBeInTheDocument();
+  });
+
   it('does not update state after unmount', async () => {
     const users = deferred<{ users: api.AdminUserSummary[] }>();
     mocked.getUsers.mockReturnValue(users.promise);

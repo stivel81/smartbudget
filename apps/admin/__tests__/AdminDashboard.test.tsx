@@ -114,6 +114,17 @@ describe('AdminDashboard failed-scan alerts', () => {
     expect(screen.getByTestId('nav-alert-dot-AI Monitor')).toBeInTheDocument();
   });
 
+  it('derives the dots only from the failed-scans endpoint', async () => {
+    mocked.getFailedScans.mockResolvedValue({ failures: [makeFailure()] });
+    renderDashboard();
+    await screen.findByTestId('bell-alert-dot');
+    expect(mocked.getFailedScans).toHaveBeenCalledTimes(1);
+    // No other API is consulted for the alert state.
+    expect(mocked.getRateLimitViolations).not.toHaveBeenCalled();
+    expect(mocked.getScanLog).not.toHaveBeenCalled();
+    expect(mocked.getUsage).not.toHaveBeenCalled();
+  });
+
   it('shows no dots when there are no failed scans', async () => {
     renderDashboard();
     await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
