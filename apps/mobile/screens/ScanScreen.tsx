@@ -29,6 +29,7 @@ import {
   toScanResult,
 } from '../lib/scan';
 import { errorMessage } from '../lib/errors';
+import { formatCurrency } from '../lib/currency';
 
 const IMAGE_COMPRESSION = 0.7;
 const SCAN_LINE_HEIGHT = 2;
@@ -125,7 +126,7 @@ export default function ScanScreen(): React.ReactElement {
   const showResultCard = (scanned: ScanResult) => {
     setResult(scanned);
     setEditedMerchant(scanned.merchant);
-    setEditedTotal(scanned.total.toFixed(2));
+    setEditedTotal(formatCurrency(scanned.total, { decimals: 2 }));
     setShowResult(true);
 
     // Animate result card sliding up
@@ -396,7 +397,7 @@ export default function ScanScreen(): React.ReactElement {
               <Text style={styles.resultValue}>{result.date}</Text>
             </ResultRow>
 
-            <ResultRow label="Total (₪)" last>
+            <ResultRow label="Total" last>
               <TextInput
                 testID="scan-total-input"
                 style={[styles.resultInput, styles.totalInput]}

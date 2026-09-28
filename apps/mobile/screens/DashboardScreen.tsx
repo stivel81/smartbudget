@@ -29,6 +29,7 @@ import {
   sumTotals,
 } from '../lib/spending';
 import { greetingFor } from '../lib/greeting';
+import { formatCurrency } from '../lib/currency';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -58,7 +59,7 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
         <MaterialCommunityIcons name={meta.icon as any} size={24} color={meta.color} />
       </View>
       <Text style={styles.categoryName}>{item.category}</Text>
-      <Text style={styles.categoryAmount}>₪{item.spent.toFixed(0)}</Text>
+      <Text style={styles.categoryAmount}>{formatCurrency(item.spent)}</Text>
       <View style={styles.progressBarContainer}>
         <View
           testID={`category-bar-${item.category}`}
@@ -87,7 +88,9 @@ const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ rece
         </Text>
         <Text style={styles.receiptDate}>{receipt.raw_response.date}</Text>
       </View>
-      <Text style={styles.receiptAmount}>₪{receipt.raw_response.total.toFixed(2)}</Text>
+      <Text style={styles.receiptAmount}>
+        {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
+      </Text>
     </TouchableOpacity>
   );
 };
@@ -133,7 +136,7 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
                 {receipt.raw_response.merchant}
               </Text>
               <Text style={styles.modalSubtitle}>
-                {receipt.raw_response.date} · ₪{receipt.raw_response.total.toFixed(2)}
+                {receipt.raw_response.date} · {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} testID="receipt-modal-close">
@@ -230,15 +233,15 @@ export default function DashboardScreen(): React.ReactElement {
         >
           <View style={styles.heroCardContent}>
             <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
-            <Text style={styles.heroAmount} testID="hero-spent">₪{totalSpent.toFixed(0)}</Text>
+            <Text style={styles.heroAmount} testID="hero-spent">{formatCurrency(totalSpent)}</Text>
             {totalBudget > 0 && (
-              <Text style={styles.heroSubtitle}>of ₪{totalBudget.toFixed(0)} budget</Text>
+              <Text style={styles.heroSubtitle}>of {formatCurrency(totalBudget)} budget</Text>
             )}
 
             {/* Stats row */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue} testID="hero-week">₪{thisWeekSpent.toFixed(0)}</Text>
+                <Text style={styles.statValue} testID="hero-week">{formatCurrency(thisWeekSpent)}</Text>
                 <Text style={styles.statLabel}>This week</Text>
               </View>
               <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />

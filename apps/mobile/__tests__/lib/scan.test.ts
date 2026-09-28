@@ -115,7 +115,7 @@ describe('lib/scan', () => {
       });
     });
 
-    it.each(['', '0', '-1', 'abc', 'NaN'])('rejects a non-positive / non-numeric total (%p)', (total) => {
+    it.each(['', '0', '-1', 'abc', 'NaN', '1,5', '1e3', '₪', '₪0.00'])('rejects a non-positive / non-numeric total (%p)', (total) => {
       expect(resolveReceiptEdits(original, 'Rami Levy', total)).toEqual({
         kind: 'invalid',
         title: 'Invalid total',
@@ -153,6 +153,28 @@ describe('lib/scan', () => {
         kind: 'update',
         updates: { merchant: 'Shufersal', total: 12 },
       });
+    });
+  });
+});
+
+describe('resolveReceiptEdits with formatted totals', () => {
+  const original = { merchant: 'Rami Levy', total: 1234.5 };
+
+  it('treats the pre-filled formatCurrency value as unchanged', () => {
+    expect(resolveReceiptEdits(original, 'Rami Levy', '₪1,234.50')).toEqual({ kind: 'unchanged' });
+  });
+
+  it('accepts ₪ and thousands separators in an edited total', () => {
+    expect(resolveReceiptEdits(original, 'Rami Levy', '₪2,000')).toEqual({
+      kind: 'update',
+      updates: { total: 2000 },
+    });
+  });
+
+  it('still accepts plain typed numbers', () => {
+    expect(resolveReceiptEdits(original, 'Rami Levy', '1300.25')).toEqual({
+      kind: 'update',
+      updates: { total: 1300.25 },
     });
   });
 });

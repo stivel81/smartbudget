@@ -361,7 +361,7 @@ describe('ScanScreen — scanning', () => {
     expect(screen.getByTestId('scan-merchant-input').props.value).toBe('Test Store');
     expect(screen.getByText('Groceries')).toBeTruthy();
     expect(screen.getByText('2026-09-01')).toBeTruthy();
-    expect(screen.getByTestId('scan-total-input').props.value).toBe('100.00');
+    expect(screen.getByTestId('scan-total-input').props.value).toBe('₪100.00');
     expect(screen.getByText('Save Receipt')).toBeTruthy();
   });
 
@@ -733,5 +733,51 @@ describe('ScanScreen — top-bar Cancel (discard)', () => {
 
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
     expect(mockDeleteReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScanScreen — total formatting (formatCurrency)', () => {
+  it('pre-fills a large total with ₪, thousands separators and agorot', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse({ total: 1234.5 }));
+    renderScan();
+    await scanFromGallery();
+
+    expect(screen.getByTestId('scan-total-input').props.value).toBe('₪1,234.50');
+    expect(screen.getByText('Total')).toBeTruthy();
+  });
+
+  it('saving the untouched formatted total sends no update and closes the card', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse({ total: 1234.5 }));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(mockUpdateReceipt).not.toHaveBeenCalled();
+  });
+
+  it('accepts an edited total that keeps the ₪ and separators', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse({ total: 1234.5 }));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.changeText(screen.getByTestId('scan-total-input'), '₪1,300.00');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { total: 1300 }, 'test-token'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('rejects an ambiguous comma total ("1,5") instead of guessing', async () => {
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.changeText(screen.getByTestId('scan-total-input'), '1,5');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    expect(alertSpy).toHaveBeenCalledWith('Invalid total', 'Total must be a positive number.');
+    expect(mockUpdateReceipt).not.toHaveBeenCalled();
   });
 });

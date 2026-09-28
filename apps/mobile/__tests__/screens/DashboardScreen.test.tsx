@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import { budgetBarColor, COLORS } from '../../lib/theme';
 
@@ -165,7 +165,7 @@ describe('DashboardScreen', () => {
     await waitFor(() => expect(screen.getByText('SPENT THIS MONTH')).toBeTruthy());
     const allByText150 = screen.queryAllByText('₪150');
     expect(allByText150.length).toBeGreaterThan(0); // Should appear in hero card
-    expect(screen.getByText('of ₪1400 budget')).toBeTruthy(); // 1000 + 400
+    expect(screen.getByText('of ₪1,400 budget')).toBeTruthy(); // 1000 + 400
     // Stats row shows this week, receipts count, budget % used
     expect(screen.getByText('This week')).toBeTruthy();
     expect(screen.getByText('Receipts')).toBeTruthy();
@@ -456,7 +456,7 @@ describe('DashboardScreen', () => {
       renderDashboard();
 
       await waitFor(() => expect(screen.getByText('Spending by Category')).toBeTruthy());
-      expect(screen.queryByText(/of ₪\d+ budget/)).toBeNull();
+      expect(screen.queryByText(/of ₪[\d,]+ budget/)).toBeNull();
       expect(textOf('hero-budget-pct')).toBe('0%');
       expect(screen.queryByText(/NaN|Infinity/)).toBeNull();
       const bar = StyleSheet.flatten(screen.getByTestId('category-bar-Groceries').props.style);
@@ -631,6 +631,61 @@ describe('DashboardScreen', () => {
       fireEvent.press(screen.getByTestId('receipt-modal-close'));
 
       await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+    });
+  });
+
+  describe('currency formatting (formatCurrency: ₪ + thousands separators)', () => {
+    it('formats hero, week, budget, category and receipt amounts with separators', async () => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [
+          // 3 days before NOW: counts toward this week and this month
+          receipt('r1', {
+            date: '2026-01-19',
+            total: 1673,
+            merchant: 'Big Shop',
+            items: [{ name: 'TV', amount: 1673, category: 'Entertainment' }],
+          }),
+          // earlier this month: month only
+          receipt('r2', {
+            date: '2026-01-02',
+            total: 1234.5,
+            merchant: 'Rami Levy',
+            items: [{ name: 'Groceries', amount: 1234.5, category: 'Groceries' }],
+          }),
+        ],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 4200)] });
+
+      renderDashboard();
+
+      await waitFor(() => expect(textOf('hero-spent')).toBe('₪2,908')); // 1673 + 1234.5, rounded
+      expect(textOf('hero-week')).toBe('₪1,673');
+      expect(screen.getByText('of ₪4,200 budget')).toBeTruthy();
+      // Category cards (whole shekels); ₪1,673 is also the hero "This week" value
+      expect(screen.getAllByText('₪1,673')).toHaveLength(2);
+      expect(screen.getByText('₪1,235')).toBeTruthy();
+      // Receipt rows keep agorot
+      expect(screen.getByText('₪1,673.00')).toBeTruthy();
+      expect(screen.getByText('₪1,234.50')).toBeTruthy();
+      // No unformatted leftovers
+      expect(screen.queryByText(/₪\d{4}/)).toBeNull();
+    });
+
+    it('formats the amount in the receipt image modal subtitle', async () => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [receipt('r1', { date: '2026-01-19', total: 2847.3, merchant: 'Big Shop' })],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r1.jpg');
+
+      renderDashboard();
+
+      fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+
+      expect(await screen.findByText('2026-01-19 · ₪2,847.30')).toBeTruthy();
+      // Let the image URL request settle inside the test.
+      expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token');
+      await waitFor(() => expect(screen.UNSAFE_getByType(Image).props.source).toEqual({ uri: 'https://example.com/r1.jpg' }));
     });
   });
 });

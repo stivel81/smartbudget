@@ -178,7 +178,7 @@ describe('BudgetScreen', () => {
 
     await waitFor(() => expect(screen.getByText('Groceries')).toBeTruthy());
     expect(screen.getByText('Dining')).toBeTruthy();
-    expect(screen.getByText('₪820 / ₪1000')).toBeTruthy(); // Groceries 82%
+    expect(screen.getByText('₪820 / ₪1,000')).toBeTruthy(); // Groceries 82%
     expect(screen.getByText('₪368 / ₪400')).toBeTruthy(); // Dining 92% over alert threshold
     expect(screen.getByText('82%')).toBeTruthy();
     expect(screen.getByText('92%')).toBeTruthy();
@@ -198,8 +198,8 @@ describe('BudgetScreen', () => {
     renderBudget();
 
     await waitFor(() => expect(screen.getByText('Total Spent')).toBeTruthy());
-    expect(screen.getByText('₪1188')).toBeTruthy(); // 820 + 368
-    expect(screen.getByText('₪1400')).toBeTruthy(); // 1000 + 400
+    expect(screen.getByText('₪1,188')).toBeTruthy(); // 820 + 368
+    expect(screen.getByText('₪1,400')).toBeTruthy(); // 1000 + 400
     expect(screen.getByText('₪212')).toBeTruthy(); // remaining: 1400 - 1188
   });
 
@@ -503,6 +503,56 @@ describe('BudgetScreen', () => {
 
       expect(mockUpsertBudget).not.toHaveBeenCalled();
       expect(alertSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('currency formatting (formatCurrency: ₪ + thousands separators)', () => {
+    it('formats per-budget and summary amounts with thousands separators', async () => {
+      mockGetBudgets.mockResolvedValue({
+        budgets: [budget('b1', 'Groceries', 4200), budget('b2', 'Dining', 1000)],
+      });
+      mockGetReceipts.mockResolvedValue({
+        receipts: [
+          receipt('r1', '2026-01-05', [
+            { name: 'Food', amount: 2847, category: 'Groceries' },
+            { name: 'Meal', amount: 100, category: 'Dining' },
+          ]),
+        ],
+      });
+
+      renderBudget();
+
+      await waitFor(() => expect(screen.getByText('₪2,847 / ₪4,200')).toBeTruthy());
+      expect(screen.getByText('₪100 / ₪1,000')).toBeTruthy();
+      expect(screen.getByTestId('budget-total-spent').props.children).toBe('₪2,947');
+      expect(screen.getByTestId('budget-total-limit').props.children).toBe('₪5,200');
+      expect(screen.getByTestId('budget-remaining').props.children).toBe('₪2,253');
+      expect(StyleSheet.flatten(screen.getByTestId('budget-remaining').props.style).color).toBe(COLORS.success);
+    });
+
+    it('shows a negative remaining amount as "-₪…" in the danger color', async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 1000)] });
+      mockGetReceipts.mockResolvedValue({
+        receipts: [receipt('r1', '2026-01-05', [{ name: 'Food', amount: 1050, category: 'Groceries' }])],
+      });
+
+      renderBudget();
+
+      await waitFor(() => expect(screen.getByTestId('budget-remaining').props.children).toBe('-₪50'));
+      expect(StyleSheet.flatten(screen.getByTestId('budget-remaining').props.style).color).toBe(COLORS.danger);
+      expect(screen.getByText('₪1,050 / ₪1,000')).toBeTruthy();
+    });
+
+    it('shows exactly zero remaining in the success color', async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b1', 'Groceries', 1000)] });
+      mockGetReceipts.mockResolvedValue({
+        receipts: [receipt('r1', '2026-01-05', [{ name: 'Food', amount: 1000, category: 'Groceries' }])],
+      });
+
+      renderBudget();
+
+      await waitFor(() => expect(screen.getByTestId('budget-remaining').props.children).toBe('₪0'));
+      expect(StyleSheet.flatten(screen.getByTestId('budget-remaining').props.style).color).toBe(COLORS.success);
     });
   });
 });

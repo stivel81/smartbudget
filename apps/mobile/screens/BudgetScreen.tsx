@@ -25,6 +25,7 @@ import {
   sumSpent,
   withSpend,
 } from '../lib/spending';
+import { formatCurrency } from '../lib/currency';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -81,7 +82,7 @@ const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ 
           <View>
             <Text style={styles.budgetItemName}>{item.category}</Text>
             <Text style={styles.budgetItemSpent}>
-              ₪{item.spent.toFixed(0)} / ₪{item.monthly_limit.toFixed(0)}
+              {formatCurrency(item.spent)} / {formatCurrency(item.monthly_limit)}
             </Text>
           </View>
         </View>
@@ -256,17 +257,23 @@ export default function BudgetScreen(): React.ReactElement {
             <View style={styles.summaryCard}>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Total Spent</Text>
-                <Text style={styles.summaryValue}>₪{totalSpent.toFixed(0)}</Text>
+                <Text style={styles.summaryValue} testID="budget-total-spent">{formatCurrency(totalSpent)}</Text>
               </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Total Budget</Text>
-                <Text style={styles.summaryValue}>₪{totalBudget.toFixed(0)}</Text>
+                <Text style={styles.summaryValue} testID="budget-total-limit">{formatCurrency(totalBudget)}</Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Remaining</Text>
-                <Text style={[styles.summaryValue, { color: COLORS.success }]}>
-                  ₪{(totalBudget - totalSpent).toFixed(0)}
+                <Text
+                  style={[
+                    styles.summaryValue,
+                    { color: totalBudget - totalSpent < 0 ? COLORS.danger : COLORS.success },
+                  ]}
+                  testID="budget-remaining"
+                >
+                  {formatCurrency(totalBudget - totalSpent)}
                 </Text>
               </View>
             </View>

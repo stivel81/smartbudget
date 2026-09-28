@@ -2,6 +2,7 @@
 // native modules so they can be unit-tested directly.
 import type { Receipt, ReceiptExtraction } from './api';
 import { CATEGORY_META } from './theme';
+import { parseAmountInput } from './currency';
 
 // Claude resizes any image above this (long edge) before billing/processing
 // it, so uploading larger buys nothing — this is also the size we store.
@@ -75,7 +76,8 @@ export function resolveReceiptEdits(
   editedTotal: string
 ): ReceiptEditOutcome {
   const merchant = editedMerchant.trim();
-  const totalNumber = Number(editedTotal);
+  // Accepts what the card pre-fills ("₪1,234.50") as well as plain typing ("1234.5").
+  const totalNumber = parseAmountInput(editedTotal);
 
   if (!merchant) {
     return { kind: 'invalid', title: 'Merchant required', message: 'Merchant name cannot be empty.' };
