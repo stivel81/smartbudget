@@ -15,6 +15,7 @@ import { MaterialCommunityIcons, Feather, FontAwesome } from '@expo/vector-icons
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { login } from '../lib/api';
 import { AuthContext } from '../App';
+import { COLORS, RADIUS, FONT_FAMILY } from '../lib/theme';
 
 type RootStackParamList = {
   Login: undefined;
@@ -23,18 +24,6 @@ type RootStackParamList = {
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
-
-const COLORS = {
-  primary: '#1D9E75',
-  primaryDark: '#0F6E56',
-  alert: '#EF4444',
-  warning: '#F59E0B',
-  background: '#f5f5f7',
-  card: '#ffffff',
-  border: '#e5e5e5',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666666',
-};
 
 export default function LoginScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
@@ -97,14 +86,10 @@ export default function LoginScreen({ navigation }: Props) {
           {/* Logo Area */}
           <View style={styles.logoContainer}>
             <View style={styles.logoIcon}>
-              <MaterialCommunityIcons
-                name="wallet"
-                size={40}
-                color="#ffffff"
-              />
+              <MaterialCommunityIcons name="wallet" size={26} color="#ffffff" />
             </View>
-            <Text style={styles.appName}>SmartBudget</Text>
-            <Text style={styles.tagline}>Track every shekel effortlessly</Text>
+            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.subtitle}>Sign in to SmartBudget</Text>
           </View>
 
           {/* Error Banner */}
@@ -119,7 +104,7 @@ export default function LoginScreen({ navigation }: Props) {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor={COLORS.textSecondary}
+              placeholderTextColor={COLORS.placeholder}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -135,7 +120,7 @@ export default function LoginScreen({ navigation }: Props) {
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Password"
-                placeholderTextColor={COLORS.textSecondary}
+                placeholderTextColor={COLORS.placeholder}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -146,10 +131,11 @@ export default function LoginScreen({ navigation }: Props) {
                 onPress={() => setShowPassword(!showPassword)}
                 disabled={loading}
                 style={styles.passwordToggle}
+                testID="login-password-toggle"
               >
                 <Feather
                   name={showPassword ? 'eye' : 'eye-off'}
-                  size={20}
+                  size={18}
                   color={COLORS.textSecondary}
                 />
               </TouchableOpacity>
@@ -163,16 +149,13 @@ export default function LoginScreen({ navigation }: Props) {
 
           {/* Sign In Button */}
           <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              loading && styles.buttonDisabled,
-            ]}
+            style={[styles.primaryButton, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
             testID="login-button"
           >
             {loading ? (
-              <ActivityIndicator color="#ffffff" />
+              <ActivityIndicator color={COLORS.buttonText} />
             ) : (
               <Text style={styles.primaryButtonText}>Sign in</Text>
             )}
@@ -181,7 +164,7 @@ export default function LoginScreen({ navigation }: Props) {
           {/* Divider */}
           <View style={styles.dividerContainer}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
+            <Text style={styles.dividerText}>OR</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -192,7 +175,7 @@ export default function LoginScreen({ navigation }: Props) {
               disabled={loading}
               testID="login-google-button"
             >
-              <FontAwesome name="google" size={20} color="#EA4335" />
+              <FontAwesome name="google" size={18} color={COLORS.textPrimary} />
               <Text style={styles.socialButtonText}>Google</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -200,14 +183,14 @@ export default function LoginScreen({ navigation }: Props) {
               disabled={loading}
               testID="login-apple-button"
             >
-              <FontAwesome name="apple" size={20} color={COLORS.textPrimary} />
+              <FontAwesome name="apple" size={18} color={COLORS.textPrimary} />
               <Text style={styles.socialButtonText}>Apple</Text>
             </TouchableOpacity>
           </View>
 
           {/* Footer Link */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? </Text>
+            <Text style={styles.footerText}>No account? </Text>
             <TouchableOpacity
               onPress={() => navigation.navigate('Signup')}
               disabled={loading}
@@ -240,36 +223,39 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   logoIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: COLORS.primary,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
   },
-  appName: {
-    fontSize: 28,
+  title: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 26,
     fontWeight: '700',
     color: COLORS.textPrimary,
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  tagline: {
+  subtitle: {
+    fontFamily: FONT_FAMILY,
     fontSize: 14,
     color: COLORS.textSecondary,
-    fontWeight: '500',
+    fontWeight: '400',
   },
   errorBanner: {
     backgroundColor: '#FEE2E2',
-    borderColor: COLORS.alert,
+    borderColor: COLORS.danger,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: RADIUS.input,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 24,
   },
   errorText: {
-    color: COLORS.alert,
+    fontFamily: FONT_FAMILY,
+    color: COLORS.danger,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -277,59 +263,60 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    height: 44,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    backgroundColor: '#fafafa',
+    fontFamily: FONT_FAMILY,
+    height: 46,
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.input,
+    paddingHorizontal: 14,
     color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '400',
   },
   passwordContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    backgroundColor: '#fafafa',
-    height: 44,
+    height: 46,
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.input,
   },
   passwordInput: {
+    fontFamily: FONT_FAMILY,
     flex: 1,
-    paddingHorizontal: 16,
+    height: 46,
+    paddingHorizontal: 14,
     color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '400',
   },
   passwordToggle: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   forgotPasswordContainer: {
     alignItems: 'flex-end',
     marginBottom: 24,
   },
   forgotPasswordText: {
-    color: COLORS.primary,
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_FAMILY,
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '500',
   },
   primaryButton: {
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
+    height: 50,
+    borderRadius: RADIUS.button,
+    backgroundColor: COLORS.button,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
   },
   buttonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_FAMILY,
+    color: COLORS.buttonText,
+    fontSize: 15,
+    fontWeight: '600',
   },
   dividerContainer: {
     flexDirection: 'row',
@@ -342,6 +329,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
   },
   dividerText: {
+    fontFamily: FONT_FAMILY,
     color: COLORS.textSecondary,
     fontSize: 12,
     marginHorizontal: 12,
@@ -354,17 +342,18 @@ const styles = StyleSheet.create({
   },
   socialButton: {
     flex: 1,
-    height: 44,
+    height: 46,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 10,
-    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.input,
+    backgroundColor: COLORS.surface,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   socialButtonText: {
+    fontFamily: FONT_FAMILY,
     color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '600',
@@ -376,13 +365,15 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
   },
   footerText: {
+    fontFamily: FONT_FAMILY,
     color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '400',
   },
   footerLink: {
-    color: COLORS.primary,
-    fontSize: 14,
+    fontFamily: FONT_FAMILY,
+    color: COLORS.textPrimary,
+    fontSize: 12,
     fontWeight: '700',
   },
 });

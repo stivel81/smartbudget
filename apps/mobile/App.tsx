@@ -5,7 +5,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Feather } from '@expo/vector-icons';
 import { logout as logoutApi, refreshSession as refreshSessionApi } from './lib/api';
+import { COLORS } from './lib/theme';
 
 // Import screens
 import LoginScreen from './screens/LoginScreen';
@@ -29,8 +31,13 @@ function BottomTabNavigator() {
     <Tab.Navigator
       screenOptions={{
         headerShown: true,
-        tabBarActiveTintColor: '#1D9E75',
-        tabBarInactiveTintColor: '#9ca3af',
+        tabBarActiveTintColor: COLORS.textPrimary,
+        tabBarInactiveTintColor: COLORS.placeholder,
+        tabBarStyle: {
+          backgroundColor: COLORS.surface,
+          borderTopColor: COLORS.border,
+          borderTopWidth: 0.5,
+        },
       }}
     >
       <Tab.Screen
@@ -39,6 +46,9 @@ function BottomTabNavigator() {
         options={{
           title: 'Dashboard',
           tabBarLabel: 'Home',
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="home" size={size} color={color} />
+          ),
         }}
       />
       <Tab.Screen
@@ -47,6 +57,9 @@ function BottomTabNavigator() {
         options={{
           title: 'Scan Receipt',
           tabBarLabel: 'Scan',
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="camera" size={size} color={color} />
+          ),
         }}
       />
       <Tab.Screen
@@ -55,6 +68,9 @@ function BottomTabNavigator() {
         options={{
           title: 'Budget',
           tabBarLabel: 'Budget',
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="bar-chart-2" size={size} color={color} />
+          ),
         }}
       />
       <Tab.Screen
@@ -63,6 +79,9 @@ function BottomTabNavigator() {
         options={{
           title: 'Profile',
           tabBarLabel: 'Profile',
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="user" size={size} color={color} />
+          ),
         }}
       />
     </Tab.Navigator>
