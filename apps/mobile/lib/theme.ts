@@ -38,6 +38,9 @@ export const COLORS = {
   heroLabelOpacity: 'rgba(255, 255, 255, 0.8)',
   controlBorderOpacity: 'rgba(255, 255, 255, 0.3)',
   modalOverlay: 'rgba(0, 0, 0, 0.6)',
+  heroStatsRowBg: 'rgba(255, 255, 255, 0.08)',
+  heroStatsDivider: 'rgba(255, 255, 255, 0.2)',
+  heroStatsLabel: 'rgba(255, 255, 255, 0.6)',
 };
 
 export const RADIUS = {
@@ -52,6 +55,10 @@ export const SPACING = {
   cardGap: 8,
   sectionMargin: 12,
 };
+
+// Alert threshold constants per DESIGN_REFERENCE_V2.md
+export const ALERT_THRESHOLD_PCT = 90;
+export const DANGER_THRESHOLD_PCT = 100;
 
 // RN's 'System' font family maps to San Francisco on iOS / Roboto on
 // Android natively, but react-native-web doesn't resolve 'System' to the

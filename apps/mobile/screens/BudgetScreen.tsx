@@ -15,7 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
 import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
-import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';
+import { COLORS, CATEGORY_META, budgetBarColor, ALERT_THRESHOLD_PCT, DANGER_THRESHOLD_PCT } from '../lib/theme';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -25,16 +25,32 @@ interface BudgetWithSpend extends Budget {
   spent: number;
 }
 
-const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[] }> = ({ overBudget }) => {
+const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[]; overDanger: BudgetWithSpend[] }> = ({
+  overBudget,
+  overDanger,
+}) => {
   if (overBudget.length === 0) return null;
 
-  const names = overBudget.map((b) => b.category).join(' and ');
+  const isRed = overDanger.length > 0;
+  const names = (isRed ? overDanger : overBudget).map((b) => b.category).join(' and ');
 
   return (
-    <View style={styles.alertBanner}>
-      <MaterialCommunityIcons name="alert-circle" size={20} color={COLORS.warning} />
-      <Text style={styles.alertText}>
-        {names} {overBudget.length === 1 ? 'is' : 'are'} at 90%+ of budget
+    <View
+      style={[
+        styles.alertBanner,
+        isRed && {
+          backgroundColor: COLORS.danger,
+          borderLeftColor: COLORS.danger,
+        },
+      ]}
+    >
+      <MaterialCommunityIcons
+        name="alert-circle"
+        size={20}
+        color={isRed ? COLORS.buttonText : COLORS.warning}
+      />
+      <Text style={[styles.alertText, isRed && { color: COLORS.buttonText }]}>
+        {names} {overDanger.length === 1 ? 'is' : 'are'} at {isRed ? '100%+' : `${ALERT_THRESHOLD_PCT}%+`} of budget
       </Text>
     </View>
   );
@@ -135,7 +151,10 @@ export default function BudgetScreen(): React.ReactElement {
     [budgets, categorySpend]
   );
 
-  const overBudget = budgetsWithSpend.filter((b) => (b.spent / b.monthly_limit) * 100 >= 90);
+  const overBudget = budgetsWithSpend.filter(
+    (b) => (b.spent / b.monthly_limit) * 100 >= ALERT_THRESHOLD_PCT
+  );
+  const overDanger = budgetsWithSpend.filter((b) => (b.spent / b.monthly_limit) * 100 >= DANGER_THRESHOLD_PCT);
   const totalSpent = budgetsWithSpend.reduce((sum, b) => sum + b.spent, 0);
   const totalBudget = budgetsWithSpend.reduce((sum, b) => sum + b.monthly_limit, 0);
 
@@ -205,7 +224,7 @@ export default function BudgetScreen(): React.ReactElement {
         ) : null}
 
         {!loading && !error && (
-          <AlertBanner overBudget={overBudget} />
+          <AlertBanner overBudget={overBudget} overDanger={overDanger} />
         )}
 
         {!loading && !error && budgetsWithSpend.length === 0 && (
@@ -322,23 +341,21 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   monthText: {
-    fontSize: 14,
+    fontSize: 12,
     color: COLORS.textSecondary,
-    fontWeight: '500',
+    fontWeight: '400',
   },
   title: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.textPrimary,
     marginTop: 4,
   },
   addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -373,11 +390,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
     backgroundColor: COLORS.alertBg,
-    borderRadius: 10,
+    borderRadius: 12,
     borderLeftWidth: 4,
     borderLeftColor: COLORS.alertBorder,
     gap: 10,
@@ -390,13 +407,13 @@ const styles = StyleSheet.create({
   },
   section: {
     paddingHorizontal: 16,
-    marginBottom: 16,
-    gap: 12,
+    marginBottom: 12,
+    gap: 8,
   },
   budgetItem: {
     backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -438,14 +455,14 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   progressBarContainer: {
-    height: 6,
-    backgroundColor: COLORS.border,
-    borderRadius: 3,
+    height: 4,
+    backgroundColor: COLORS.background,
+    borderRadius: 2,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 2,
   },
   summaryCard: {
     marginHorizontal: 16,

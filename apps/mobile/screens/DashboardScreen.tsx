@@ -14,9 +14,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext } from '../App';
-import { getReceipts, getReceiptImageUrl, Receipt } from '../lib/api';
+import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
-import { COLORS, CATEGORY_META } from '../lib/theme';
+import { COLORS, CATEGORY_META, budgetBarColor } from '../lib/theme';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -33,12 +33,16 @@ const Avatar: React.FC<{ initials: string }> = ({ initials }) => (
   </View>
 );
 
-const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number }> = ({
+const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?: Budget }> = ({
   item,
   totalSpent,
+  budget,
 }) => {
   const meta = categoryMeta(item.category);
   const share = totalSpent > 0 ? (item.spent / totalSpent) * 100 : 0;
+  // Use budget percentage if budget exists, otherwise use share of total spend
+  const displayPercentage = budget ? (item.spent / budget.monthly_limit) * 100 : share;
+  const barColor = budget ? budgetBarColor(displayPercentage) : COLORS.success;
 
   return (
     <View style={styles.categoryCard}>
@@ -51,7 +55,7 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number }> = ({
         <View
           style={[
             styles.progressBar,
-            { width: `${Math.min(share, 100)}%`, backgroundColor: COLORS.success },
+            { width: `${Math.min(displayPercentage, 100)}%`, backgroundColor: barColor },
           ]}
         />
       </View>
@@ -144,6 +148,7 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
 export default function DashboardScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
@@ -157,8 +162,14 @@ export default function DashboardScreen(): React.ReactElement {
         setLoading(true);
         setError('');
         try {
-          const { receipts: data } = await getReceipts(auth.accessToken);
-          if (!cancelled) setReceipts(data);
+          const [receiptsRes, budgetsRes] = await Promise.all([
+            getReceipts(auth.accessToken),
+            getBudgets(auth.accessToken),
+          ]);
+          if (!cancelled) {
+            setReceipts(receiptsRes.receipts);
+            setBudgets(budgetsRes.budgets);
+          }
         } catch (err: any) {
           if (!cancelled) setError(err.message || 'Failed to load receipts');
         } finally {
@@ -174,6 +185,13 @@ export default function DashboardScreen(): React.ReactElement {
   );
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.raw_response.total, 0);
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const thisWeekSpent = receipts
+    .filter((r) => new Date(r.created_at) >= weekAgo)
+    .reduce((sum, r) => sum + r.raw_response.total, 0);
+  const totalBudget = budgets.reduce((sum, b) => sum + b.monthly_limit, 0);
+  const budgetPercentage = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
 
   const categoryTotals: CategoryTotal[] = Object.values(
     receipts
@@ -185,6 +203,11 @@ export default function DashboardScreen(): React.ReactElement {
       }, {})
   ).sort((a, b) => b.spent - a.spent);
 
+  const budgetsByCategory = budgets.reduce<Record<string, Budget>>((acc, b) => {
+    acc[b.category] = b;
+    return acc;
+  }, {});
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }}>
       <ScrollView
@@ -194,29 +217,42 @@ export default function DashboardScreen(): React.ReactElement {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Hi, Adrian</Text>
-            <Text style={styles.subGreeting}>Welcome back</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>Good morning</Text>
+            <Text style={styles.title}>My Finances</Text>
           </View>
-          <Avatar initials="AS" />
+          <Avatar initials={auth.userEmail ? auth.userEmail.substring(0, 2).toUpperCase() : 'U'} />
         </View>
 
-        {/* Balance Card */}
+        {/* Balance Card (Hero) */}
         <LinearGradient
           colors={[COLORS.button, COLORS.button]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.balanceCard}
+          style={styles.heroCard}
         >
-          <View style={styles.balanceCardContent}>
-            <View style={styles.balanceRow}>
-              <View>
-                <Text style={styles.balanceLabel}>Total spent</Text>
-                <Text style={styles.balanceAmount}>₪{totalSpent.toFixed(0)}</Text>
+          <View style={styles.heroCardContent}>
+            <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
+            <Text style={styles.heroAmount}>₪{totalSpent.toFixed(0)}</Text>
+            {totalBudget > 0 && (
+              <Text style={styles.heroSubtitle}>of ₪{totalBudget.toFixed(0)} budget</Text>
+            )}
+
+            {/* Stats row */}
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>₪{thisWeekSpent.toFixed(0)}</Text>
+                <Text style={styles.statLabel}>This week</Text>
               </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.balanceLabel}>Receipts</Text>
-                <Text style={styles.receiptCount}>{receipts.length}</Text>
+              <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{receipts.length}</Text>
+                <Text style={styles.statLabel}>Receipts</Text>
+              </View>
+              <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{Math.round(budgetPercentage)}%</Text>
+                <Text style={styles.statLabel}>Budget used</Text>
               </View>
             </View>
           </View>
@@ -247,7 +283,12 @@ export default function DashboardScreen(): React.ReactElement {
             <Text style={styles.sectionTitle}>Spending by Category</Text>
             <View style={styles.categoryGrid}>
               {categoryTotals.map((item) => (
-                <CategoryItem key={item.category} item={item} totalSpent={totalSpent} />
+                <CategoryItem
+                  key={item.category}
+                  item={item}
+                  totalSpent={totalSpent}
+                  budget={budgetsByCategory[item.category]}
+                />
               ))}
             </View>
           </View>
@@ -288,60 +329,86 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   greeting: {
-    fontSize: 28,
+    fontSize: 12,
+    fontWeight: '400',
+    color: COLORS.textSecondary,
+  },
+  title: {
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.textPrimary,
-  },
-  subGreeting: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
     marginTop: 4,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    color: COLORS.buttonText,
+    color: COLORS.textPrimary,
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: 14,
   },
-  balanceCard: {
-    marginHorizontal: 16,
-    borderRadius: 12,
-    padding: 20,
+  heroCard: {
+    marginHorizontal: 12,
+    borderRadius: 20,
+    padding: 16,
     marginBottom: 24,
   },
-  balanceCardContent: {
-    gap: 16,
+  heroCardContent: {
+    gap: 12,
   },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  balanceLabel: {
+  heroLabel: {
     color: COLORS.heroLabelOpacity,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  heroAmount: {
+    color: COLORS.buttonText,
+    fontSize: 34,
+    fontWeight: '700',
+  },
+  heroSubtitle: {
+    color: COLORS.heroSubtextOpacity,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '400',
   },
-  balanceAmount: {
-    color: COLORS.buttonText,
-    fontSize: 28,
-    fontWeight: '700',
+  statsRow: {
+    backgroundColor: COLORS.heroStatsRowBg,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
     marginTop: 4,
   },
-  receiptCount: {
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
     color: COLORS.buttonText,
-    fontSize: 20,
+    fontSize: 14,
     fontWeight: '700',
-    marginTop: 4,
+  },
+  statLabel: {
+    color: COLORS.heroStatsLabel,
+    fontSize: 11,
+    fontWeight: '400',
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 20,
+    marginHorizontal: 8,
   },
   loadingContainer: {
     paddingVertical: 24,
@@ -374,7 +441,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
     color: COLORS.textPrimary,
     marginBottom: 12,
@@ -388,7 +455,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: '48%',
     backgroundColor: COLORS.surface,
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -415,7 +482,7 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     height: 4,
-    backgroundColor: COLORS.border,
+    backgroundColor: COLORS.background,
     borderRadius: 2,
     overflow: 'hidden',
   },
@@ -429,7 +496,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     backgroundColor: COLORS.surface,
-    borderRadius: 10,
+    borderRadius: 14,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
