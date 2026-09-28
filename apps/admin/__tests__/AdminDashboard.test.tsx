@@ -101,6 +101,8 @@ describe('AdminDashboard navigation', () => {
   });
 });
 
+const recentFailure = () => makeFailure({ created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
+
 describe('AdminDashboard failed-scan alerts', () => {
   it('checks failed scans with the access token', () => {
     renderDashboard();
@@ -108,14 +110,14 @@ describe('AdminDashboard failed-scan alerts', () => {
   });
 
   it('shows the bell and AI Monitor dots when failed scans exist', async () => {
-    mocked.getFailedScans.mockResolvedValue({ failures: [makeFailure()] });
+    mocked.getFailedScans.mockResolvedValue({ failures: [recentFailure()] });
     renderDashboard();
     expect(await screen.findByTestId('bell-alert-dot')).toBeInTheDocument();
     expect(screen.getByTestId('nav-alert-dot-AI Monitor')).toBeInTheDocument();
   });
 
   it('derives the dots only from the failed-scans endpoint', async () => {
-    mocked.getFailedScans.mockResolvedValue({ failures: [makeFailure()] });
+    mocked.getFailedScans.mockResolvedValue({ failures: [recentFailure()] });
     renderDashboard();
     await screen.findByTestId('bell-alert-dot');
     expect(mocked.getFailedScans).toHaveBeenCalledTimes(1);
@@ -123,6 +125,26 @@ describe('AdminDashboard failed-scan alerts', () => {
     expect(mocked.getRateLimitViolations).not.toHaveBeenCalled();
     expect(mocked.getScanLog).not.toHaveBeenCalled();
     expect(mocked.getUsage).not.toHaveBeenCalled();
+  });
+
+  it('shows no dots when every failure is older than the alert window', async () => {
+    mocked.getFailedScans.mockResolvedValue({
+      failures: [makeFailure({ created_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() })],
+    });
+    renderDashboard();
+    await waitFor(() => expect(mocked.getFailedScans).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(screen.queryByTestId('bell-alert-dot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nav-alert-dot-AI Monitor')).not.toBeInTheDocument();
+  });
+
+  it('shows the dots when one of several failures is recent', async () => {
+    mocked.getFailedScans.mockResolvedValue({
+      failures: [makeFailure({ id: 'old', created_at: '2020-01-01T00:00:00Z' }), recentFailure()],
+    });
+    renderDashboard();
+    expect(await screen.findByTestId('bell-alert-dot')).toBeInTheDocument();
+    expect(screen.getByTestId('nav-alert-dot-AI Monitor')).toBeInTheDocument();
   });
 
   it('shows no dots when there are no failed scans', async () => {
@@ -148,7 +170,7 @@ describe('AdminDashboard failed-scan alerts', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const { unmount } = render(<AdminDashboard accessToken="tok" userEmail="a@b.com" onSignOut={jest.fn()} />);
     unmount();
-    d.resolve({ failures: [makeFailure()] });
+    d.resolve({ failures: [recentFailure()] });
     await d.promise;
     await Promise.resolve();
     expect(errorSpy).not.toHaveBeenCalled();

@@ -10,6 +10,7 @@ import AuditLogView from './views/AuditLogView';
 import RateLimitViolationsView from './views/RateLimitViolationsView';
 import SettingsView from './views/SettingsView';
 import { getFailedScans } from '../lib/api';
+import { hasRecentFailures } from '../lib/metrics';
 
 type View =
   | { name: Exclude<NavItemId, 'settings'> }
@@ -33,7 +34,7 @@ export default function AdminDashboard({
     let cancelled = false;
     getFailedScans(accessToken)
       .then((res) => {
-        if (!cancelled) setHasScanAlerts(res.failures.length > 0);
+        if (!cancelled) setHasScanAlerts(hasRecentFailures(res.failures, new Date()));
       })
       .catch(() => {
         // Non-critical — the bell just stays quiet if this check fails.

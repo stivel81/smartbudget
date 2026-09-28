@@ -5,7 +5,7 @@
 // that depends on "now" takes it as a parameter so it can be tested with fixed
 // dates.
 
-import type { AdminUserSummary, DailyUsage, ScanLogEntry } from './api';
+import type { AdminUserSummary, DailyUsage, ScanFailure, ScanLogEntry } from './api';
 
 // Claude Haiku 4.5 pricing — keep in sync with apps/backend/src/routes/admin.ts.
 export const HAIKU_INPUT_COST_PER_TOKEN = 1 / 1_000_000;
@@ -73,6 +73,27 @@ export function monthCostUsd(byDay: DailyUsage[], now: Date): number {
 export function failedScansToday(log: Pick<ScanLogEntry, 'status' | 'createdAt'>[], now: Date): number {
   const today = isoDay(now);
   return log.filter((e) => e.status === 'failed' && isoDay(new Date(e.createdAt)) === today).length;
+}
+
+/** How far back a scan failure still lights the bell / AI Monitor alert dots. */
+export const SCAN_ALERT_WINDOW_HOURS = 24;
+
+/**
+ * True when any failure happened within the last `windowHours` of `now`.
+ * Timestamps slightly in the future (clock skew) count as recent; unparseable
+ * ones are ignored. Without a window, a single failure ever recorded would
+ * keep the alert dots lit forever.
+ */
+export function hasRecentFailures(
+  failures: Pick<ScanFailure, 'created_at'>[],
+  now: Date,
+  windowHours = SCAN_ALERT_WINDOW_HOURS
+): boolean {
+  const cutoffMs = now.getTime() - windowHours * 60 * 60 * 1000;
+  return failures.some((f) => {
+    const t = new Date(f.created_at).getTime();
+    return !Number.isNaN(t) && t >= cutoffMs;
+  });
 }
 
 /**

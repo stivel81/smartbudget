@@ -1,4 +1,6 @@
 import {
+  SCAN_ALERT_WINDOW_HOURS,
+  hasRecentFailures,
   HAIKU_INPUT_COST_PER_TOKEN,
   HAIKU_OUTPUT_COST_PER_TOKEN,
   apiCallsToday,
@@ -201,5 +203,52 @@ describe('donutDashOffset', () => {
     expect(donutDashOffset(0, 30)).toBeCloseTo(c);
     expect(donutDashOffset(100, 30)).toBeCloseTo(0);
     expect(donutDashOffset(75, 30)).toBeCloseTo(c / 4);
+  });
+});
+
+describe('hasRecentFailures', () => {
+  const now = new Date('2026-09-28T12:00:00Z');
+  const at = (iso: string) => ({ created_at: iso });
+
+  it('defaults to a 24-hour window', () => {
+    expect(SCAN_ALERT_WINDOW_HOURS).toBe(24);
+  });
+
+  it('is false for no failures', () => {
+    expect(hasRecentFailures([], now)).toBe(false);
+  });
+
+  it('is true for a failure exactly at the window boundary', () => {
+    expect(hasRecentFailures([at('2026-09-27T12:00:00.000Z')], now)).toBe(true);
+  });
+
+  it('is false for a failure 1ms before the window', () => {
+    expect(hasRecentFailures([at('2026-09-27T11:59:59.999Z')], now)).toBe(false);
+  });
+
+  it('is true for a failure moments ago', () => {
+    expect(hasRecentFailures([at('2026-09-28T11:59:00Z')], now)).toBe(true);
+  });
+
+  it('treats slightly-future timestamps (clock skew) as recent', () => {
+    expect(hasRecentFailures([at('2026-09-28T12:00:05Z')], now)).toBe(true);
+  });
+
+  it('ignores unparseable timestamps', () => {
+    expect(hasRecentFailures([at('not-a-date'), at('')], now)).toBe(false);
+  });
+
+  it('is true when any one of several failures is recent', () => {
+    expect(hasRecentFailures([at('2020-01-01T00:00:00Z'), at('2026-09-28T09:00:00Z')], now)).toBe(true);
+  });
+
+  it('is false when all failures are old', () => {
+    expect(hasRecentFailures([at('2020-01-01T00:00:00Z'), at('2026-09-26T00:00:00Z')], now)).toBe(false);
+  });
+
+  it('respects a custom window', () => {
+    const f = [at('2026-09-28T10:30:00Z')];
+    expect(hasRecentFailures(f, now, 1)).toBe(false);
+    expect(hasRecentFailures(f, now, 2)).toBe(true);
   });
 });
