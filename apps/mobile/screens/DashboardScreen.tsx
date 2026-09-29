@@ -39,6 +39,7 @@ import {
   budgetsByCategory as indexBudgetsByCategory,
   formatReceiptDate,
   percentOf,
+  receiptCategory,
   receiptsForMonth,
   receiptsSince,
   sortedCategoryTotals,
@@ -90,9 +91,8 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
 };
 
 const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ receipt, onPress }) => {
-  const { metaFor } = useCategories();
-  const primaryCategory = receipt.raw_response.items[0]?.category ?? 'Other';
-  const meta = metaFor(primaryCategory);
+  const { metaFor, canonicalName } = useCategories();
+  const meta = metaFor(receiptCategory(receipt.raw_response?.items, canonicalName));
 
   return (
     <TouchableOpacity style={styles.receiptItem} onPress={onPress} testID={`receipt-item-${receipt.id}`}>

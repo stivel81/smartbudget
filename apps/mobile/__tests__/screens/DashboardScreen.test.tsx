@@ -1650,6 +1650,26 @@ describe('DashboardScreen with custom categories', () => {
     expect(iconIn('receipt-item-r1', 'paw').props.color).toBe('#DB2777');
   });
 
+  it('the Recent Receipts icon follows the largest category, not the first item', async () => {
+    // A ₪63 grocery run whose first line (₪7.90) was moved to Pets.
+    const groceries = receipt('r-gro', {
+      date: '2026-01-21',
+      total: 63,
+      items: [
+        { name: 'Treats', amount: 7.9, category: 'Pets' },
+        { name: 'Bread', amount: 12.1, category: 'Groceries' },
+        { name: 'Cheese', amount: 43, category: 'groceries' },
+      ],
+    });
+    mockGetReceipts.mockResolvedValue({ receipts: [groceries] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    renderDashboard({ categories: WITH_PETS });
+
+    await waitFor(() => expect(screen.getByTestId('receipt-item-r-gro')).toBeTruthy());
+    expect(iconIn('receipt-item-r-gro', CATEGORY_META.Groceries.icon).props.color).toBe(CATEGORY_META.Groceries.color);
+    expect(within(screen.getByTestId('receipt-item-r-gro')).UNSAFE_queryAllByProps({ name: 'paw' })).toHaveLength(0);
+  });
+
   it('the receipt details picker offers custom categories and saves the NAME', async () => {
     const r = receipt('r1', {
       date: '2026-01-20',

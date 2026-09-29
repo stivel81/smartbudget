@@ -8,6 +8,7 @@ import {
   isInMonth,
   parseReceiptDate,
   percentOf,
+  receiptCategory,
   receiptSpendDate,
   receiptsForMonth,
   receiptsSince,
@@ -531,5 +532,58 @@ describe('categoryTotals / sortedCategoryTotals with custom categories', () => {
       'Deleted Category': 7,
       Other: 3,
     });
+  });
+});
+
+describe('receiptCategory (receipt-level category / row icon)', () => {
+  const item = (category: string, amount: number) => ({ name: category, amount, category });
+
+  it('picks the category with the largest total, not the first item', () => {
+    // ₪63 grocery receipt whose first line (₪7.90) was moved to a custom category.
+    expect(receiptCategory([item('Pets', 7.9), item('Groceries', 12.1), item('Groceries', 43)])).toBe('Groceries');
+  });
+
+  it('sums every item of a category before comparing', () => {
+    expect(receiptCategory([item('Dining', 30), item('Health', 20), item('Health', 20)])).toBe('Health');
+  });
+
+  it('a tie goes to the category whose first item comes earliest', () => {
+    expect(receiptCategory([item('Transport', 10), item('Dining', 10)])).toBe('Transport');
+    expect(receiptCategory([item('Dining', 4), item('Transport', 10), item('Dining', 6)])).toBe('Dining');
+    expect(receiptCategory([item('Health', 1), item('Transport', 5), item('Dining', 5)])).toBe('Transport');
+  });
+
+  it('treats custom and base categories alike', () => {
+    expect(receiptCategory([item('Groceries', 5), item('Pets', 40)])).toBe('Pets');
+    expect(receiptCategory([item('Pets', 5), item('Groceries', 40)])).toBe('Groceries');
+  });
+
+  it('no items (or missing items) -> Other', () => {
+    expect(receiptCategory([])).toBe('Other');
+    expect(receiptCategory(undefined)).toBe('Other');
+    expect(receiptCategory(null)).toBe('Other');
+  });
+
+  it('groups names case-insensitively, returning the first-seen spelling', () => {
+    expect(receiptCategory([item('pets', 5), item('Groceries', 8), item('PETS', 5)])).toBe('pets');
+    expect(receiptCategory([item('Dining', 9), item('groceries', 5), item('Groceries ', 5)])).toBe('groceries');
+  });
+
+  it('groups through groupAs first (canonicalName: case folding to the real name, unknown -> Other)', () => {
+    const canonical = (name: string) => {
+      const known: Record<string, string> = { groceries: 'Groceries', pets: 'Pets', other: 'Other' };
+      return known[name.trim().toLowerCase()] ?? 'Other';
+    };
+    expect(receiptCategory([item('pets', 5), item('Groceries', 8), item('PETS', 5)], canonical)).toBe('Pets');
+    // Two unknown names fold into Other and together outweigh Groceries.
+    expect(receiptCategory([item('Groceries', 8), item('Gone A', 5), item('Gone B', 5)], canonical)).toBe('Other');
+  });
+
+  it('ignores non-finite amounts', () => {
+    expect(receiptCategory([item('Dining', Number.NaN), item('Health', 1)])).toBe('Health');
+  });
+
+  it('works with negative lines (discounts) by net total', () => {
+    expect(receiptCategory([item('Dining', 20), item('Health', 15), item('Dining', -10)])).toBe('Health');
   });
 });

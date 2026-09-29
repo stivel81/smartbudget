@@ -4,6 +4,7 @@
 // parameter so results are deterministic and testable.
 
 import type { Budget, Receipt } from './api';
+import { OTHER_CATEGORY } from './categories';
 
 export interface CategoryTotal {
   category: string;
@@ -112,6 +113,35 @@ export function categoryTotals(receipts: Receipt[], groupAs: CategoryGrouping = 
     }
   }
   return totals;
+}
+
+/**
+ * The category a whole receipt is shown under (its row icon): the one with
+ * the largest total across its line items, grouped by `groupAs` (pass
+ * useCategories().canonicalName) and then case-insensitively, like
+ * categoryTotals. A tie goes to the category whose first item comes earliest.
+ * The name returned is the grouped name as first seen; no items -> Other.
+ */
+export function receiptCategory(
+  items: readonly { category: string; amount: number }[] | null | undefined,
+  groupAs: CategoryGrouping = asIs
+): string {
+  // Insertion order = order of each category's first item, so keeping the
+  // first strict maximum settles ties by earliest item.
+  const groups = new Map<string, { name: string; total: number }>();
+  for (const item of items ?? []) {
+    const name = groupAs(item.category);
+    const key = name.trim().toLocaleLowerCase();
+    const amount = Number.isFinite(item.amount) ? item.amount : 0;
+    const group = groups.get(key);
+    if (group) group.total += amount;
+    else groups.set(key, { name, total: amount });
+  }
+  let best: { name: string; total: number } | null = null;
+  for (const group of groups.values()) {
+    if (best === null || group.total > best.total) best = group;
+  }
+  return best?.name ?? OTHER_CATEGORY;
 }
 
 /** Category totals as a list, largest spend first (ties broken by name). */
