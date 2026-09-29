@@ -70,6 +70,12 @@ describe('resolveApiBaseUrl', () => {
       }
     });
 
+    it.each(['https://api-dev.REPLACE_ME', 'https://api.REPLACE_ME/'])('rejects the eas.json placeholder %p with its own message', (raw) => {
+      const result = resolveApiBaseUrl(raw, false);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('placeholder');
+    });
+
     it('does not fall back to localhost for a set-but-invalid value in development', () => {
       expect(resolveApiBaseUrl('api.example.com', true)).not.toEqual({ ok: true, url: DEV_API_BASE_URL });
     });

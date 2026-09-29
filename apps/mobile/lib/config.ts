@@ -10,6 +10,9 @@ export const DEV_API_BASE_URL = 'http://localhost:3000';
 
 export const API_BASE_URL_ENV = 'EXPO_PUBLIC_API_BASE_URL';
 
+/** Marks the not-yet-real URLs in eas.json; a build carrying one must not start. */
+export const PLACEHOLDER_MARKER = 'REPLACE_ME';
+
 export type ApiBaseUrlResult = { ok: true; url: string } | { ok: false; error: string };
 
 // scheme://host[:port][/path] — host is a name/IPv4 or a bracketed IPv6.
@@ -30,6 +33,12 @@ export function resolveApiBaseUrl(raw: string | undefined, isDev: boolean): ApiB
     return {
       ok: false,
       error: `${API_BASE_URL_ENV} is not set. This build has no backend address; set it for the EAS build profile (eas.json) and rebuild.`,
+    };
+  }
+  if (value.includes(PLACEHOLDER_MARKER)) {
+    return {
+      ok: false,
+      error: `${API_BASE_URL_ENV} is still the placeholder "${value}". Put the real backend URL in eas.json and rebuild.`,
     };
   }
   const url = value.replace(/\/+$/, '');
