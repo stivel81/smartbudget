@@ -137,3 +137,58 @@ describe('CategoryPicker', () => {
     );
   });
 });
+
+import { BASE_CATEGORY_LIST, toCategoryInfo } from '../../lib/categories';
+import { CategoriesContext, staticCategoriesValue } from '../../lib/categoriesContext';
+
+describe('CategoryPicker with custom categories', () => {
+  const PETS = toCategoryInfo({
+    id: 'c-pets',
+    user_id: 'u1',
+    name: 'Pets',
+    icon: 'paw',
+    color: '#DB2777',
+    is_base: false,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  });
+  const value = staticCategoriesValue([...BASE_CATEGORY_LIST, PETS]);
+
+  function renderWithCustom(selected: string | null = 'Pets') {
+    const onSelect = jest.fn();
+    const onClose = jest.fn();
+    render(
+      <CategoriesContext.Provider value={value}>
+        <CategoryPicker
+          visible
+          categories={value.names}
+          selected={selected}
+          onSelect={onSelect}
+          onClose={onClose}
+        />
+      </CategoriesContext.Provider>
+    );
+    return { onSelect, onClose };
+  }
+
+  it('lists base + custom, the custom one with its own icon and tinted tile', () => {
+    renderWithCustom();
+    for (const name of [...RECEIPT_CATEGORIES, 'Pets']) {
+      expect(screen.getByTestId(`category-option-${name}`)).toBeTruthy();
+    }
+    expect(within(screen.getByTestId('category-option-Pets')).getByTestId('icon-paw')).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByTestId('category-option-icon-Pets').props.style).backgroundColor).toBe(
+      '#DB27771F'
+    );
+    expect(screen.getByTestId('category-option-check-Pets')).toBeTruthy();
+    // Base options keep their look.
+    expect(within(screen.getByTestId('category-option-Dining')).getByTestId(`icon-${CATEGORY_META.Dining.icon}`)).toBeTruthy();
+  });
+
+  it('selecting a custom category passes its name and closes', () => {
+    const { onSelect, onClose } = renderWithCustom('Groceries');
+    fireEvent.press(screen.getByTestId('category-option-Pets'));
+    expect(onSelect).toHaveBeenCalledWith('Pets');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

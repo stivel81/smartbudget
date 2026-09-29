@@ -25,7 +25,13 @@ jest.mock('../../lib/api', () => ({
 
 import BudgetScreen from '../../screens/BudgetScreen';
 import { AuthContext } from '../../lib/auth';
-import { COLORS } from '../../lib/theme';
+import { CATEGORY_META, COLORS } from '../../lib/theme';
+import { BASE_CATEGORY_IDS, BASE_CATEGORY_LIST, toCategoryInfo } from '../../lib/categories';
+import {
+  CategoriesContext,
+  staticCategoriesValue,
+  type CategoriesContextValue,
+} from '../../lib/categoriesContext';
 
 // Pin "now" to mid-January 2026 (local time) so month filtering doesn't
 // depend on the date the suite runs.
@@ -63,8 +69,13 @@ function receipt(
 }
 
 /** `null` renders signed out (no access or refresh token). */
-function renderBudget(accessToken: string | null = 'test-token') {
-  return render(
+function renderBudget(accessToken: string | null = 'test-token', categories?: CategoriesContextValue) {
+  const ui = renderBudgetTree(accessToken);
+  return render(categories ? <CategoriesContext.Provider value={categories}>{ui}</CategoriesContext.Provider> : ui);
+}
+
+function renderBudgetTree(accessToken: string | null) {
+  return (
     <AuthContext.Provider
       value={{
         isAuthenticated: true,
@@ -88,6 +99,18 @@ function renderBudget(accessToken: string | null = 'test-token') {
     </AuthContext.Provider>
   );
 }
+
+const PETS = toCategoryInfo({
+  id: 'c-pets',
+  user_id: 'u1',
+  name: 'Pets',
+  icon: 'paw',
+  color: '#DB2777',
+  is_base: false,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+});
+const WITH_PETS = staticCategoriesValue([...BASE_CATEGORY_LIST, PETS]);
 
 describe('BudgetScreen', () => {
   let alertSpy: jest.SpyInstance;
@@ -359,7 +382,9 @@ describe('BudgetScreen', () => {
       // Saving without changes upserts the pre-filled category/limit
       mockUpsertBudget.mockResolvedValue({ budget: budget('b1', 'Dining', 400) });
       fireEvent.press(screen.getByTestId('budget-save-button'));
-      await waitFor(() => expect(mockUpsertBudget).toHaveBeenCalledWith('Dining', 400));
+      await waitFor(() =>
+        expect(mockUpsertBudget).toHaveBeenCalledWith({ categoryId: BASE_CATEGORY_IDS.Dining }, 400)
+      );
     });
 
     it('resets the form when opening add after edit', async () => {
@@ -403,7 +428,7 @@ describe('BudgetScreen', () => {
 
       await waitFor(() => expect(screen.queryByText('Set Budget')).toBeNull());
       expect(mockUpsertBudget).toHaveBeenCalledTimes(1);
-      expect(mockUpsertBudget).toHaveBeenCalledWith('Transport', 250);
+      expect(mockUpsertBudget).toHaveBeenCalledWith({ categoryId: BASE_CATEGORY_IDS.Transport }, 250);
       // Initial load + refresh after save
       expect(mockGetBudgets).toHaveBeenCalledTimes(2);
       expect(mockGetBudgets).toHaveBeenLastCalledWith();
@@ -598,6 +623,74 @@ describe('BudgetScreen', () => {
       expect(StyleSheet.flatten(screen.getByTestId('budget-scroll').props.style).backgroundColor).toBe(
         COLORS.background
       );
+    });
+  });
+
+  describe('custom categories', () => {
+    it('offers custom categories in the add modal and saves them by category_id', async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      renderBudget('test-token', WITH_PETS);
+      await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('budget-add-button'));
+      for (const base of BASE_CATEGORY_LIST) {
+        expect(screen.getByTestId(`budget-category-chip-${base.name}`)).toBeTruthy();
+      }
+      fireEvent.press(screen.getByTestId('budget-category-chip-Pets'));
+      fireEvent.changeText(screen.getByTestId('budget-limit-input'), '120');
+
+      const saved = { ...budget('b9', 'Pets', 120), category_id: 'c-pets' };
+      mockUpsertBudget.mockResolvedValue({ budget: saved });
+      mockGetBudgets.mockResolvedValue({ budgets: [saved] });
+      fireEvent.press(screen.getByTestId('budget-save-button'));
+
+      await waitFor(() => expect(screen.getByTestId('budget-item-b9')).toBeTruthy());
+      expect(mockUpsertBudget).toHaveBeenCalledWith({ categoryId: 'c-pets' }, 120);
+    });
+
+    it('only offers the base categories without a loaded list', async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      renderBudget();
+      await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('budget-add-button'));
+      expect(screen.queryByTestId('budget-category-chip-Pets')).toBeNull();
+      expect(screen.getByTestId('budget-category-chip-Other')).toBeTruthy();
+    });
+
+    it("shows a custom budget row with the category's icon and color, and counts its spend", async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [{ ...budget('b9', 'Pets', 200), category_id: 'c-pets' }] });
+      mockGetReceipts.mockResolvedValue({
+        receipts: [
+          receipt('r1', '2026-01-10', [
+            { name: 'Kibble', amount: 40, category: 'Pets' },
+            { name: 'Toy', amount: 10, category: 'pets' },
+            { name: 'Milk', amount: 5, category: 'Groceries' },
+          ]),
+        ],
+      });
+      renderBudget('test-token', WITH_PETS);
+
+      await waitFor(() => expect(screen.getByTestId('budget-item-b9')).toBeTruthy());
+      expect(screen.getByText('₪50 / ₪200')).toBeTruthy();
+      const icon = screen.UNSAFE_getAllByProps({ name: 'paw' })[0];
+      expect(icon.props.color).toBe('#DB2777');
+    });
+
+    it('a budget for an unknown category looks like Other and saves by name', async () => {
+      mockGetBudgets.mockResolvedValue({ budgets: [budget('b3', 'Vanished', 100)] });
+      mockGetReceipts.mockResolvedValue({ receipts: [] });
+      renderBudget('test-token', WITH_PETS);
+      await waitFor(() => expect(screen.getByTestId('budget-item-b3')).toBeTruthy());
+
+      expect(screen.UNSAFE_getAllByProps({ name: CATEGORY_META.Other.icon }).length).toBeGreaterThan(0);
+
+      fireEvent.press(screen.getByTestId('budget-item-b3'));
+      mockUpsertBudget.mockResolvedValue({ budget: budget('b3', 'Vanished', 100) });
+      fireEvent.press(screen.getByTestId('budget-save-button'));
+      await waitFor(() => expect(mockUpsertBudget).toHaveBeenCalledWith('Vanished', 100));
     });
   });
 });

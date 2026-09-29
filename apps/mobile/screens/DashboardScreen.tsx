@@ -29,7 +29,7 @@ import {
 } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, RADIUS, budgetBarColor } from '../lib/theme';
-import { RECEIPT_CATEGORIES, categoryMeta } from '../lib/categories';
+import { useCategories } from '../lib/categoriesContext';
 import { errorMessage } from '../lib/errors';
 import CategoryPicker from '../components/CategoryPicker';
 import ReceiptItemsList from '../components/ReceiptItemsList';
@@ -61,7 +61,8 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
   totalSpent,
   budget,
 }) => {
-  const meta = categoryMeta(item.category);
+  const { metaFor } = useCategories();
+  const meta = metaFor(item.category);
   // Use budget percentage if budget exists, otherwise use share of total spend
   const displayPercentage = budget
     ? budgetUsagePct(item.spent, budget.monthly_limit)
@@ -89,8 +90,9 @@ const CategoryItem: React.FC<{ item: CategoryTotal; totalSpent: number; budget?:
 };
 
 const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ receipt, onPress }) => {
+  const { metaFor } = useCategories();
   const primaryCategory = receipt.raw_response.items[0]?.category ?? 'Other';
-  const meta = categoryMeta(primaryCategory);
+  const meta = metaFor(primaryCategory);
 
   return (
     <TouchableOpacity style={styles.receiptItem} onPress={onPress} testID={`receipt-item-${receipt.id}`}>
@@ -126,6 +128,7 @@ const ReceiptImageModal: React.FC<{
   onReceiptUpdated: (receipt: Receipt) => void;
   onReceiptDeleted: (id: string) => void;
 }> = ({ receipt, onClose, onReceiptUpdated, onReceiptDeleted }) => {
+  const { names: categoryNames } = useCategories();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -295,7 +298,7 @@ const ReceiptImageModal: React.FC<{
       {pickerIndex !== null && items[pickerIndex] ? (
         <CategoryPicker
           visible
-          categories={RECEIPT_CATEGORIES}
+          categories={categoryNames}
           selected={items[pickerIndex].category}
           subtitle={items[pickerIndex].name}
           onSelect={(category) => changeCategory(pickerIndex, category)}
@@ -315,6 +318,7 @@ export default function DashboardScreen(): React.ReactElement {
   const hasSession = isSignedIn(auth);
   const hasAccessToken = auth.accessToken !== null;
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
+  const { canonicalName, retryIfFailed } = useCategories();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
@@ -371,10 +375,12 @@ export default function DashboardScreen(): React.ReactElement {
   useFocusEffect(
     useCallback(() => {
       load();
+      // Categories failed to load earlier (offline)? Try again with the data.
+      retryIfFailed();
       return () => {
         loadSeq.current++;
       };
-    }, [load, hasAccessToken])
+    }, [load, hasAccessToken, retryIfFailed])
   );
 
   // Receipt deleted from the modal: close it, drop the row right away, then
@@ -401,7 +407,9 @@ export default function DashboardScreen(): React.ReactElement {
   const hasBudget = totalBudget > 0;
   const failed = summary === 'failed';
 
-  const categoryTotals = sortedCategoryTotals(monthReceipts);
+  // Grouped by category name: custom categories get their own card; names
+  // no longer known (e.g. a deleted custom category) fold into Other.
+  const categoryTotals = sortedCategoryTotals(monthReceipts, canonicalName);
   const budgetsByCategory = indexBudgetsByCategory(budgets);
 
   return (

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ReceiptExtraction } from '../lib/api';
-import { categoryMeta } from '../lib/categories';
+import { useCategories } from '../lib/categoriesContext';
 import { formatCurrency } from '../lib/currency';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY } from '../lib/theme';
@@ -29,10 +29,11 @@ export default function ReceiptItemsList({
   savingIndex = null,
   testIDPrefix = 'receipt-line',
 }: ReceiptItemsListProps): React.ReactElement {
+  const { metaFor } = useCategories();
   return (
     <View testID={`${testIDPrefix}s`}>
       {items.map((item, index) => {
-        const meta = categoryMeta(item.category);
+        const meta = metaFor(item.category);
         const saving = savingIndex === index;
         const chipDisabled = disabled || !onPressCategory || savingIndex !== null;
         return (

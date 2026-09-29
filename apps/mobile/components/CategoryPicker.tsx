@@ -1,13 +1,13 @@
 import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { categoryMeta } from '../lib/categories';
+import { useCategories } from '../lib/categoriesContext';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 
 export interface CategoryPickerProps {
   visible: boolean;
-  /** The choices, in display order. Passed in (not hardcoded) so custom categories can be added later. */
+  /** The choices, in display order (screens pass useCategories().names: base + custom). */
   categories: readonly string[];
   /** The current category (gets the check mark), or null for none. */
   selected: string | null;
@@ -27,6 +27,9 @@ export default function CategoryPicker({
   onClose,
   subtitle,
 }: CategoryPickerProps): React.ReactElement {
+  // Base categories keep their CATEGORY_META look, custom ones their own
+  // icon/color; unknown names look like Other.
+  const { metaFor } = useCategories();
   const choose = (category: string) => {
     onSelect(category);
     onClose();
@@ -73,7 +76,7 @@ export default function CategoryPicker({
 
           <ScrollView style={styles.list} bounces={false}>
             {categories.map((category, i) => {
-              const meta = categoryMeta(category);
+              const meta = metaFor(category);
               const isSelected = category === selected;
               return (
                 <TouchableOpacity
@@ -85,7 +88,10 @@ export default function CategoryPicker({
                   accessibilityState={{ selected: isSelected }}
                   testID={`category-option-${category}`}
                 >
-                  <View style={[styles.optionIcon, { backgroundColor: meta.backgroundColor }]}>
+                  <View
+                    style={[styles.optionIcon, { backgroundColor: meta.backgroundColor }]}
+                    testID={`category-option-icon-${category}`}
+                  >
                     <MaterialCommunityIcons name={meta.icon as any} size={18} color={meta.color} />
                   </View>
                   <Text style={[styles.optionName, isSelected && styles.optionNameSelected]}>{category}</Text>

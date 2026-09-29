@@ -36,7 +36,7 @@ import {
   toScanResult,
   withCategories,
 } from '../lib/scan';
-import { RECEIPT_CATEGORIES } from '../lib/categories';
+import { useCategories } from '../lib/categoriesContext';
 import { errorMessage } from '../lib/errors';
 import { formatCurrency } from '../lib/currency';
 import CategoryPicker from '../components/CategoryPicker';
@@ -112,6 +112,8 @@ const ResultRow: React.FC<ResultRowProps> = ({ label, children, last }) => (
 );
 
 export default function ScanScreen(): React.ReactElement {
+  // Base + custom categories for the pickers and the Category row's icon.
+  const { names: categoryNames, metaFor } = useCategories();
   const [showResult, setShowResult] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [editedMerchant, setEditedMerchant] = useState('');
@@ -484,7 +486,7 @@ export default function ScanScreen(): React.ReactElement {
               >
                 <View style={styles.categoryIcon}>
                   <MaterialCommunityIcons
-                    name={categoryRowIcon(displayedItems) as keyof typeof MaterialCommunityIcons.glyphMap}
+                    name={categoryRowIcon(displayedItems, metaFor) as keyof typeof MaterialCommunityIcons.glyphMap}
                     size={16}
                     color={COLORS.textPrimary}
                   />
@@ -547,7 +549,7 @@ export default function ScanScreen(): React.ReactElement {
       {result && pickerIndex === ALL_ITEMS && result.items.length > 0 ? (
         <CategoryPicker
           visible
-          categories={RECEIPT_CATEGORIES}
+          categories={categoryNames}
           selected={commonCategory(displayedItems)}
           subtitle={result.items.length === 1 ? 'Applies to the item' : `Applies to all ${result.items.length} items`}
           onSelect={chooseCategoryForAll}
@@ -558,7 +560,7 @@ export default function ScanScreen(): React.ReactElement {
       {result && typeof pickerIndex === 'number' && result.items[pickerIndex] ? (
         <CategoryPicker
           visible
-          categories={RECEIPT_CATEGORIES}
+          categories={categoryNames}
           selected={editedCategories[pickerIndex] ?? null}
           subtitle={result.items[pickerIndex].name}
           onSelect={(category) => chooseCategory(pickerIndex, category)}

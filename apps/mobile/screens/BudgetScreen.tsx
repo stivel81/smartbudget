@@ -14,8 +14,10 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { AuthContext, isSignedIn } from '../lib/auth';
-import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
-import { COLORS, CATEGORY_META, budgetBarColor, ALERT_THRESHOLD_PCT, DANGER_THRESHOLD_PCT } from '../lib/theme';
+import { getBudgets, getReceipts, upsertBudget, Budget, Receipt } from '../lib/api';
+import { COLORS, budgetBarColor, ALERT_THRESHOLD_PCT, DANGER_THRESHOLD_PCT } from '../lib/theme';
+import { RECEIPT_CATEGORIES } from '../lib/categories';
+import { useCategories } from '../lib/categoriesContext';
 import {
   budgetUsagePct,
   budgetsAtOrAbove,
@@ -26,10 +28,6 @@ import {
   withSpend,
 } from '../lib/spending';
 import { CURRENCY_SYMBOL, formatCurrency } from '../lib/currency';
-
-function categoryMeta(category: string) {
-  return CATEGORY_META[category] ?? CATEGORY_META.Other;
-}
 
 interface BudgetWithSpend extends Budget {
   spent: number;
@@ -68,7 +66,9 @@ const AlertBanner: React.FC<{ overBudget: BudgetWithSpend[]; overDanger: BudgetW
 };
 
 const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ item, onPress }) => {
-  const meta = categoryMeta(item.category);
+  // Base categories keep their look; custom ones show their own icon/color.
+  const { metaFor } = useCategories();
+  const meta = metaFor(item.category);
   const percentage = budgetUsagePct(item.spent, item.monthly_limit);
   const barColor = budgetBarColor(percentage);
 
@@ -112,6 +112,8 @@ export default function BudgetScreen(): React.ReactElement {
   // failed transiently finally renews: load again then.
   const hasSession = isSignedIn(auth);
   const hasAccessToken = auth.accessToken !== null;
+  // Base + custom categories: the modal's choices, row icons, spend grouping.
+  const { categories, findByName, canonicalName, retryIfFailed } = useCategories();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,10 +149,11 @@ export default function BudgetScreen(): React.ReactElement {
       }
 
       load();
+      retryIfFailed();
       return () => {
         cancelled = true;
       };
-    }, [hasSession, hasAccessToken])
+    }, [hasSession, hasAccessToken, retryIfFailed])
   );
 
   const now = new Date();
@@ -158,9 +161,9 @@ export default function BudgetScreen(): React.ReactElement {
 
   // Budgets are monthly limits, so only this month's receipts count toward them.
   const categorySpend = useMemo(
-    () => categoryTotals(receiptsForMonth(receipts, now)),
+    () => categoryTotals(receiptsForMonth(receipts, now), canonicalName),
     // Keyed on the month (not `now`) so it recomputes on month rollover, not every render.
-    [receipts, monthKey]
+    [receipts, monthKey, canonicalName]
   );
 
   const budgetsWithSpend: BudgetWithSpend[] = useMemo(
@@ -197,7 +200,10 @@ export default function BudgetScreen(): React.ReactElement {
 
     setSaving(true);
     try {
-      await upsertBudget(modalCategory, limitNumber);
+      // By id (base ids are fixed, custom ones come from the list); a name
+      // the list doesn't know (an old budget's) is sent as the name.
+      const target = findByName(modalCategory);
+      await upsertBudget(target ? { categoryId: target.id } : modalCategory, limitNumber);
       const { budgets: updated } = await getBudgets();
       setBudgets(updated);
       setModalVisible(false);
@@ -309,13 +315,20 @@ export default function BudgetScreen(): React.ReactElement {
 
             <Text style={styles.modalLabel}>Category</Text>
             <View style={styles.categoryChips}>
-              {RECEIPT_CATEGORIES.map((cat) => (
+              {categories.map(({ name: cat, icon, color }) => (
                 <TouchableOpacity
                   key={cat}
                   style={[styles.categoryChip, modalCategory === cat && styles.categoryChipSelected]}
                   onPress={() => setModalCategory(cat)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: modalCategory === cat }}
                   testID={`budget-category-chip-${cat}`}
                 >
+                  <MaterialCommunityIcons
+                    name={icon as any}
+                    size={14}
+                    color={modalCategory === cat ? COLORS.buttonText : color}
+                  />
                   <Text
                     style={[
                       styles.categoryChipText,
@@ -575,6 +588,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,

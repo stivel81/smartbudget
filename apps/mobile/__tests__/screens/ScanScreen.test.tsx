@@ -71,6 +71,8 @@ jest.mock('expo-image-manipulator', () => ({
 
 import ScanScreen from '../../screens/ScanScreen';
 import { AuthContext, AuthContextType } from '../../lib/auth';
+import { BASE_CATEGORY_LIST, toCategoryInfo } from '../../lib/categories';
+import { CategoriesContext, staticCategoriesValue } from '../../lib/categoriesContext';
 
 const picker = ImagePicker as jest.Mocked<typeof ImagePicker>;
 const manipulate = ImageManipulator.manipulate as jest.Mock;
@@ -1373,5 +1375,97 @@ describe('ScanScreen — duplicate warning', () => {
     mockScanReceipt.mockResolvedValue(scanResponse());
     await scanFromGallery();
     expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+  });
+});
+
+describe('custom categories', () => {
+  const PETS = toCategoryInfo({
+    id: 'c-pets',
+    user_id: 'u1',
+    name: 'Pets',
+    icon: 'paw',
+    color: '#DB2777',
+    is_base: false,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  });
+  const WITH_PETS = staticCategoriesValue([...BASE_CATEGORY_LIST, PETS]);
+
+  function renderScanWithCategories() {
+    return render(
+      <CategoriesContext.Provider value={WITH_PETS}>
+        <AuthContext.Provider value={authValue()}>
+          <ScanScreen />
+        </AuthContext.Provider>
+      </CategoriesContext.Provider>
+    );
+  }
+
+  it('the per-item picker lists base + custom categories, and Save sends the custom NAME', async () => {
+    renderScanWithCategories();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-1'));
+    for (const c of ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other', 'Pets']) {
+      expect(screen.getByTestId(`category-option-${c}`)).toBeTruthy();
+    }
+    expect(within(screen.getByTestId('category-option-Pets')).getByTestId('icon-paw')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('category-option-Pets'));
+
+    // The chip takes the custom category's icon.
+    expect(within(screen.getByTestId('scan-item-category-1')).getByTestId('icon-paw')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() =>
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { items: [{ index: 1, category: 'Pets' }] })
+    );
+  });
+
+  it('the Category row applies a custom category to every item and shows its icon', async () => {
+    renderScanWithCategories();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-category-row'));
+    expect(screen.getByTestId('category-option-Pets')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('category-option-Pets'));
+
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Pets');
+    expect(within(screen.getByTestId('scan-category-row')).getByTestId('icon-paw')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() =>
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', {
+        items: [
+          { index: 0, category: 'Pets' },
+          { index: 1, category: 'Pets' },
+        ],
+      })
+    );
+  });
+
+  it('a scan that returns a custom category name shows it with its own icon, checked in the picker', async () => {
+    mockScanReceipt.mockResolvedValue(
+      scanResponse({
+        items: [
+          { name: 'Kibble', amount: 60, category: 'Pets' },
+          { name: 'Toy', amount: 40, category: 'Pets' },
+        ],
+      })
+    );
+    renderScanWithCategories();
+    await scanFromGallery();
+
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Pets');
+    expect(within(screen.getByTestId('scan-category-row')).getByTestId('icon-paw')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    expect(screen.getByTestId('category-option-check-Pets')).toBeTruthy();
+  });
+
+  it('without the categories list only the base categories are offered', async () => {
+    renderScan();
+    await scanFromGallery();
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    expect(screen.queryByTestId('category-option-Pets')).toBeNull();
+    expect(screen.getByTestId('category-option-Other')).toBeTruthy();
   });
 });

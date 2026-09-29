@@ -115,3 +115,39 @@ describe('ReceiptItemsList', () => {
     });
   });
 });
+
+import { BASE_CATEGORY_LIST, toCategoryInfo } from '../../lib/categories';
+import { CategoriesContext, staticCategoriesValue } from '../../lib/categoriesContext';
+
+describe('ReceiptItemsList with custom categories', () => {
+  const PETS = toCategoryInfo({
+    id: 'c-pets',
+    user_id: 'u1',
+    name: 'Pets',
+    icon: 'paw',
+    color: '#DB2777',
+    is_base: false,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  });
+
+  it("renders a custom category chip with its icon and tint; unknown names look like Other", () => {
+    render(
+      <CategoriesContext.Provider value={staticCategoriesValue([...BASE_CATEGORY_LIST, PETS])}>
+        <ReceiptItemsList
+          items={[
+            { name: 'Kibble', amount: 40, category: 'Pets' },
+            { name: 'Old', amount: 5, category: 'Gone' },
+          ]}
+          onPressCategory={jest.fn()}
+        />
+      </CategoriesContext.Provider>
+    );
+    const chip = screen.getByTestId('receipt-line-category-0');
+    expect(within(chip).getByTestId('icon-paw')).toBeTruthy();
+    expect(within(chip).getByText('Pets')).toBeTruthy();
+    expect(style('receipt-line-category-0').backgroundColor).toBe('#DB27771F');
+    expect(within(screen.getByTestId('receipt-line-category-1')).getByTestId(`icon-${CATEGORY_META.Other.icon}`)).toBeTruthy();
+    expect(style('receipt-line-category-1').backgroundColor).toBe(CATEGORY_META.Other.backgroundColor);
+  });
+});

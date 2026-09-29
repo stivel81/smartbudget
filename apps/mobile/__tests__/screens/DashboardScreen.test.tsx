@@ -32,6 +32,13 @@ jest.mock('../../lib/api', () => ({
 
 import DashboardScreen from '../../screens/DashboardScreen';
 import { AuthContext } from '../../lib/auth';
+import { BASE_CATEGORY_LIST, toCategoryInfo } from '../../lib/categories';
+import {
+  CategoriesContext,
+  staticCategoriesValue,
+  type CategoriesContextValue,
+} from '../../lib/categoriesContext';
+import { CATEGORY_META } from '../../lib/theme';
 
 // Pin "now" to Thursday 22 Jan 2026, 09:00 local, so month/week filtering
 // and the greeting don't depend on when the suite runs.
@@ -43,9 +50,16 @@ function renderDashboard(
     refreshToken = 'test-refresh-token',
     userEmail = 'test@example.com',
     userName = null,
-  }: { accessToken?: string | null; refreshToken?: string | null; userEmail?: string | null; userName?: string | null } = {}
+    categories,
+  }: {
+    accessToken?: string | null;
+    refreshToken?: string | null;
+    userEmail?: string | null;
+    userName?: string | null;
+    categories?: CategoriesContextValue;
+  } = {}
 ) {
-  return render(
+  const ui = (
     <AuthContext.Provider
       value={{
         isAuthenticated: true,
@@ -68,6 +82,7 @@ function renderDashboard(
       <DashboardScreen />
     </AuthContext.Provider>
   );
+  return render(categories ? <CategoriesContext.Provider value={categories}>{ui}</CategoriesContext.Provider> : ui);
 }
 
 function receipt(
@@ -1548,5 +1563,120 @@ describe('DashboardScreen receipt modal: no stored image', () => {
     const text = await screen.findByText('Failed to load receipt image');
     expect(StyleSheet.flatten(text.props.style).color).toBe(COLORS.danger);
     expect(screen.queryByTestId('receipt-modal-no-image')).toBeNull();
+  });
+});
+
+describe('DashboardScreen with custom categories', () => {
+  const PETS = toCategoryInfo({
+    id: 'c-pets',
+    user_id: 'u1',
+    name: 'Pets',
+    icon: 'paw',
+    color: '#DB2777',
+    is_base: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  });
+  const WITH_PETS = staticCategoriesValue([...BASE_CATEGORY_LIST, PETS]);
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  const RECEIPTS = [
+    receipt('r1', {
+      date: '2026-01-20',
+      total: 85,
+      items: [
+        { name: 'Kibble', amount: 40, category: 'Pets' },
+        { name: 'Toy', amount: 10, category: 'pets' },
+        { name: 'Old', amount: 20, category: 'Deleted Category' },
+        { name: 'Misc', amount: 5, category: 'Other' },
+        { name: 'Milk', amount: 10, category: 'Groceries' },
+      ],
+    }),
+  ];
+
+  function iconIn(testID: string, name: string) {
+    return within(screen.getByTestId(testID)).UNSAFE_getAllByProps({ name })[0];
+  }
+
+  it('gives a custom category its own card with its icon and color; unknown names fold into Other', async () => {
+    mockGetReceipts.mockResolvedValue({ receipts: RECEIPTS });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    renderDashboard({ categories: WITH_PETS });
+
+    await waitFor(() => expect(screen.getByTestId('category-card-Pets')).toBeTruthy());
+    expect(within(screen.getByTestId('category-card-Pets')).getByText('₪50')).toBeTruthy();
+    expect(iconIn('category-card-Pets', 'paw').props.color).toBe('#DB2777');
+    expect(within(screen.getByTestId('category-card-Other')).getByText('₪25')).toBeTruthy();
+    expect(screen.queryByTestId('category-card-Deleted Category')).toBeNull();
+    expect(screen.queryByTestId('category-card-pets')).toBeNull();
+    expect(iconIn('category-card-Groceries', CATEGORY_META.Groceries.icon).props.color).toBe(
+      CATEGORY_META.Groceries.color
+    );
+  });
+
+  it('uses a custom budget for the custom card bar', async () => {
+    mockGetReceipts.mockResolvedValue({ receipts: RECEIPTS });
+    mockGetBudgets.mockResolvedValue({ budgets: [{ ...budget('b1', 'Pets', 100), category_id: 'c-pets' }] });
+    renderDashboard({ categories: WITH_PETS });
+
+    await waitFor(() => expect(screen.getByTestId('category-bar-Pets')).toBeTruthy());
+    expect(StyleSheet.flatten(screen.getByTestId('category-bar-Pets').props.style).width).toBe('50%');
+  });
+
+  it('while the list is not loaded, custom names keep their own card (rendered like Other)', async () => {
+    mockGetReceipts.mockResolvedValue({ receipts: RECEIPTS });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    renderDashboard();
+
+    await waitFor(() => expect(screen.getByTestId('category-card-Pets')).toBeTruthy());
+    expect(iconIn('category-card-Pets', CATEGORY_META.Other.icon)).toBeTruthy();
+    expect(screen.getByTestId('category-card-Deleted Category')).toBeTruthy();
+  });
+
+  it('shows a custom receipt icon in Recent Receipts', async () => {
+    mockGetReceipts.mockResolvedValue({ receipts: RECEIPTS });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    renderDashboard({ categories: WITH_PETS });
+
+    await waitFor(() => expect(screen.getByTestId('receipt-item-r1')).toBeTruthy());
+    expect(iconIn('receipt-item-r1', 'paw').props.color).toBe('#DB2777');
+  });
+
+  it('the receipt details picker offers custom categories and saves the NAME', async () => {
+    const r = receipt('r1', {
+      date: '2026-01-20',
+      total: 50,
+      items: [{ name: 'Kibble', amount: 50, category: 'Other' }],
+    });
+    mockGetReceipts.mockResolvedValue({ receipts: [r] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r1.jpg');
+    const updated = { ...r, raw_response: { ...r.raw_response, items: [{ name: 'Kibble', amount: 50, category: 'Pets' }] } };
+    mockUpdateItemCategories.mockResolvedValue({ receipt: updated });
+    renderDashboard({ categories: WITH_PETS });
+
+    fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+    await screen.findByTestId('receipt-modal-close');
+    await waitFor(() => expect(screen.UNSAFE_getByType(Image)).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+    for (const c of ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other', 'Pets']) {
+      expect(screen.getByTestId(`category-option-${c}`)).toBeTruthy();
+    }
+    fireEvent.press(screen.getByTestId('category-option-Pets'));
+
+    expect(mockUpdateItemCategories).toHaveBeenCalledWith('r1', [{ index: 0, category: 'Pets' }]);
+    await waitFor(() => expect(screen.getByTestId('category-card-Pets')).toBeTruthy());
+    expect(screen.getByTestId('receipt-modal-item-category-0').props.accessibilityLabel).toBe(
+      'Category for Kibble: Pets. Change category'
+    );
   });
 });
