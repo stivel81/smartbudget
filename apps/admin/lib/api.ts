@@ -83,7 +83,8 @@ export interface AdminReceipt {
   raw_response: {
     merchant: string;
     total: number;
-    date: string;
+    /** ISO "YYYY-MM-DD", or null when the receipt had no legible date. */
+    date: string | null;
     items: { name: string; amount: number; category: string }[];
   };
 }

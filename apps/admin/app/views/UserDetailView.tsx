@@ -14,6 +14,7 @@ import {
 } from '../../lib/api';
 import { buttonStyle, cardStyle, cellStyle, dangerButtonStyle, secondaryButtonStyle } from '../../lib/styles';
 import { isSuspended, toggleSuspension } from '../../lib/users';
+import { formatReceiptDate } from '../../lib/receiptDate';
 import DeleteUserConfirm from '../components/DeleteUserConfirm';
 
 export default function UserDetailView({
@@ -183,7 +184,7 @@ export default function UserDetailView({
                   {receipts.map((r) => (
                     <tr key={r.id}>
                       <td style={cellStyle}>{r.raw_response.merchant}</td>
-                      <td style={cellStyle}>{r.raw_response.date}</td>
+                      <td style={cellStyle}>{formatReceiptDate(r)}</td>
                       <td style={cellStyle}>₪{r.raw_response.total.toFixed(2)}</td>
                     </tr>
                   ))}

@@ -61,6 +61,25 @@ describe('UserDetailView — loading & display', () => {
     expect(screen.getByText('Groceries: ₪500')).toBeInTheDocument();
     expect(screen.getByText('Shufersal')).toBeInTheDocument();
     expect(screen.getByText('₪42.50')).toBeInTheDocument();
+    // Receipt dates use the same day-first display as the mobile app.
+    expect(screen.getByText('04/03/2026')).toBeInTheDocument();
+    expect(screen.queryByText('2026-03-04')).not.toBeInTheDocument();
+  });
+
+  it('shows the upload day for receipts with no (or a legacy ambiguous) date', async () => {
+    const created = new Date(2026, 8, 29, 10, 0, 0).toISOString();
+    mockDetail(makeUserDetail(), {
+      receipts: [
+        makeReceipt({ id: 'a', created_at: created, raw_response: { merchant: 'NoDate', total: 1, date: null, items: [] } }),
+        makeReceipt({ id: 'b', created_at: created, raw_response: { merchant: 'Legacy', total: 2, date: '17/08/2026', items: [] } }),
+        makeReceipt({ id: 'c', raw_response: { merchant: 'Titanium', total: 350, date: '2026-08-17', items: [] } }),
+      ],
+    });
+    renderView();
+    expect(await screen.findByText('Titanium')).toBeInTheDocument();
+    expect(screen.getAllByText('29/09/2026')).toHaveLength(2);
+    expect(screen.getByText('17/08/2026')).toBeInTheDocument();
+    expect(screen.queryByText('2026-08-17')).not.toBeInTheDocument();
   });
 
   it('renders fallbacks: no name, unverified, suspended, admin, no budgets, no receipts', async () => {
