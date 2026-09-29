@@ -1,5 +1,26 @@
-// API base URL for backend communication
-export const API_BASE_URL = 'http://localhost:3000';
+import { resolveApiBaseUrl } from './config';
+
+// Backend base URL (no trailing slash), from EXPO_PUBLIC_API_BASE_URL; in
+// development it falls back to http://localhost:3000 (see lib/config). The
+// static `process.env.EXPO_PUBLIC_...` access is required: Expo inlines only
+// that exact form into the bundle.
+const apiBaseUrl = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL, __DEV__);
+
+/** The resolved backend URL, or '' when the build is misconfigured (see API_CONFIG_ERROR). */
+export const API_BASE_URL: string = apiBaseUrl.ok ? apiBaseUrl.url : '';
+
+/**
+ * Why this build can't reach the backend (EXPO_PUBLIC_API_BASE_URL missing
+ * outside development, or invalid), else null. App shows it on a startup
+ * error screen, and every request rejects with it instead of going anywhere.
+ */
+export const API_CONFIG_ERROR: string | null = apiBaseUrl.ok ? null : apiBaseUrl.error;
+
+/** Absolute URL of a backend route; throws the config error (as an ApiError) when misconfigured. */
+function apiUrl(path: string): string {
+  if (API_CONFIG_ERROR !== null) throw { message: API_CONFIG_ERROR } as ApiError;
+  return `${API_BASE_URL}${path}`;
+}
 
 export { RECEIPT_CATEGORIES } from './categories';
 
@@ -123,7 +144,7 @@ async function authedFetch(path: string, init: AuthedRequestInit): Promise<Respo
 
   const hasBody = init.body !== undefined;
   const send = (accessToken: string) =>
-    fetch(`${API_BASE_URL}${path}`, {
+    fetch(apiUrl(path), {
       ...(init.method && init.method !== 'GET' ? { method: init.method } : {}),
       headers: bearerHeaders(accessToken, hasBody),
       ...(hasBody ? { body: JSON.stringify(init.body) } : {}),
@@ -150,7 +171,7 @@ async function authedRequestNoContent(path: string, init: AuthedRequestInit, fal
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/login`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -172,7 +193,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
 }
 
 export async function refreshSession(refreshToken: string): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/refresh`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -406,7 +427,7 @@ export interface LogoutTokens {
  */
 export async function logout({ accessToken, refreshToken }: LogoutTokens): Promise<void> {
   if (!accessToken && !refreshToken) return;
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/logout`), {
     method: 'POST',
     headers: accessToken ? bearerHeaders(accessToken, true) : { 'Content-Type': 'application/json' },
     body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
@@ -420,7 +441,7 @@ export async function signup(
   password: string,
   name: string
 ): Promise<SignupResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/signup`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/signup`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -449,7 +470,7 @@ export interface ForgotPasswordResponse {
  * not mean the email is registered.
  */
 export async function requestPasswordReset(email: string): Promise<ForgotPasswordResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/forgot-password`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/forgot-password`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -477,7 +498,7 @@ export async function resetPassword(
   code: string,
   newPassword: string
 ): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/reset-password`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/reset-password`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -524,7 +545,7 @@ export interface ResendSignupResponse {
  * sign straight in. A wrong/expired code rejects with code 400.
  */
 export async function verifySignup(email: string, code: string): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/verify-signup`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/verify-signup`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -549,7 +570,7 @@ export async function verifySignup(email: string, code: string): Promise<LoginRe
  * email was actually sent.
  */
 export async function resendSignupCode(email: string): Promise<ResendSignupResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/resend-signup`, {
+  const response = await fetch(apiUrl(`/api/v1/auth/resend-signup`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

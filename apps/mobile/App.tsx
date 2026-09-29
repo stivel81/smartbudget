@@ -11,6 +11,7 @@ import {
   refreshSession as refreshSessionApi,
   setAccessTokenProvider,
   SESSION_EXPIRED_MESSAGE,
+  API_CONFIG_ERROR,
 } from './lib/api';
 import { COLORS } from './lib/theme';
 import { AuthContext } from './lib/auth';
@@ -31,6 +32,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import ManageCategoriesScreen from './screens/ManageCategoriesScreen';
 import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import HelpSupportScreen from './screens/HelpSupportScreen';
+import ConfigErrorScreen from './components/ConfigErrorScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator<AuthStackParamList & SignedInStackParamList>();
@@ -108,7 +110,18 @@ const STORAGE_KEY_REFRESH_TOKEN = '@smartbudget/refreshToken';
 const STORAGE_KEY_EMAIL = '@smartbudget/userEmail';
 const STORAGE_KEY_NAME = '@smartbudget/userName';
 
+/**
+ * A misconfigured build (no/invalid EXPO_PUBLIC_API_BASE_URL outside dev)
+ * shows a startup error screen instead of the app, rather than failing every
+ * request later or throwing at import time (a release build would just close
+ * on launch with the reason only in device logs).
+ */
 export default function App() {
+  if (API_CONFIG_ERROR !== null) return <ConfigErrorScreen message={API_CONFIG_ERROR} />;
+  return <ConfiguredApp />;
+}
+
+function ConfiguredApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
