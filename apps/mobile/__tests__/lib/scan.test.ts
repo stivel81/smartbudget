@@ -15,6 +15,8 @@ import {
   resolveReceiptEdits,
   summarizeCategories,
   toScanResult,
+  duplicateFrom,
+  duplicateWarningText,
 } from '../../lib/scan';
 import { CATEGORY_META } from '../../lib/theme';
 import type { Receipt } from '../../lib/api';
@@ -363,6 +365,60 @@ describe('lib/scan Category row helpers', () => {
     it("none, or an unknown shared category -> the Other icon", () => {
       expect(categoryRowIcon([])).toBe(CATEGORY_META.Other.icon);
       expect(categoryRowIcon([item('Pets')])).toBe(CATEGORY_META.Other.icon);
+    });
+  });
+
+  describe('duplicateFrom', () => {
+    const DUP = { id: 'd1', merchant: 'SHUFERSAL DEAL', date: '2026-09-28', total: 72.6 };
+
+    it('returns the duplicate summary when present', () => {
+      expect(duplicateFrom({ duplicate_of: DUP })).toEqual(DUP);
+    });
+
+    it.each([
+      ['absent (older backend)', {}],
+      ['null', { duplicate_of: null }],
+      ['not an object', { duplicate_of: 'd1' }],
+      ['missing id', { duplicate_of: { merchant: 'X', date: '2026-09-28', total: 1 } }],
+      ['empty id', { duplicate_of: { ...DUP, id: '' } }],
+    ])('returns null when %s', (_label, response) => {
+      expect(duplicateFrom(response)).toBeNull();
+    });
+
+    it('tolerates missing or mistyped fields other than id', () => {
+      expect(duplicateFrom({ duplicate_of: { id: 'd1', total: 'x' } })).toEqual({
+        id: 'd1',
+        merchant: '',
+        date: '',
+        total: NaN,
+      });
+    });
+  });
+
+  describe('duplicateWarningText', () => {
+    it('formats merchant · DD/MM/YYYY · ₪total', () => {
+      expect(duplicateWarningText({ id: 'd1', merchant: 'SHUFERSAL DEAL', date: '2026-09-28', total: 72.6 })).toBe(
+        'Looks like a duplicate of SHUFERSAL DEAL · 28/09/2026 · ₪72.60'
+      );
+    });
+
+    it('works with a Hebrew merchant and thousands separators', () => {
+      expect(duplicateWarningText({ id: 'd1', merchant: 'רמי לוי', date: '2026-01-05', total: 1234.5 })).toBe(
+        'Looks like a duplicate of רמי לוי · 05/01/2026 · ₪1,234.50'
+      );
+    });
+
+    it('shows a non-ISO date as given', () => {
+      expect(duplicateWarningText({ id: 'd1', merchant: 'A', date: '28/09/2026', total: 1 })).toBe(
+        'Looks like a duplicate of A · 28/09/2026 · ₪1.00'
+      );
+    });
+
+    it('leaves out missing parts', () => {
+      expect(duplicateWarningText({ id: 'd1', merchant: 'A', date: '', total: NaN })).toBe('Looks like a duplicate of A');
+      expect(duplicateWarningText({ id: 'd1', merchant: ' ', date: '', total: NaN })).toBe(
+        'Looks like a duplicate of a receipt you already have'
+      );
     });
   });
 });

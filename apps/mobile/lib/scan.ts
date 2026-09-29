@@ -1,9 +1,9 @@
 // Pure helpers for the receipt scanner (ScanScreen). Kept free of React /
 // native modules so they can be unit-tested directly.
-import type { ItemCategoryUpdate, Receipt, ReceiptExtraction } from './api';
+import type { DuplicateReceipt, ItemCategoryUpdate, Receipt, ReceiptExtraction } from './api';
 import { CATEGORY_META } from './theme';
-import { parseAmountInput } from './currency';
-import { formatReceiptDate } from './spending';
+import { formatCurrency, parseAmountInput } from './currency';
+import { formatDayMonthYear, formatReceiptDate, parseReceiptDate } from './spending';
 
 // Claude (Haiku 4.5) resizes any image above this (long edge) before
 // billing/processing it, so uploading larger buys nothing — this is also the
@@ -171,4 +171,38 @@ export function resolveReceiptEdits(
       ...(categoryChanges.length > 0 && { items: categoryChanges }),
     },
   };
+}
+
+/**
+ * The `duplicate_of` of a scan/PATCH response, or null when absent (older
+ * backend), null, or not shaped like a receipt summary.
+ */
+export function duplicateFrom(response: { duplicate_of?: unknown }): DuplicateReceipt | null {
+  const dup = response.duplicate_of;
+  if (!dup || typeof dup !== 'object') return null;
+  const { id, merchant, date, total } = dup as Record<string, unknown>;
+  if (typeof id !== 'string' || !id) return null;
+  return {
+    id,
+    merchant: typeof merchant === 'string' ? merchant : '',
+    date: typeof date === 'string' ? date : '',
+    total: typeof total === 'number' && Number.isFinite(total) ? total : NaN,
+  };
+}
+
+/**
+ * "Looks like a duplicate of SHUFERSAL DEAL · 28/09/2026 · ₪72.60". The date
+ * is shown DD/MM/YYYY like everywhere else (as given when it isn't ISO);
+ * missing parts are left out.
+ */
+export function duplicateWarningText(dup: DuplicateReceipt): string {
+  const parsed = parseReceiptDate(dup.date);
+  const parts = [
+    dup.merchant.trim(),
+    parsed ? formatDayMonthYear(parsed) : dup.date.trim(),
+    Number.isFinite(dup.total) ? formatCurrency(dup.total, { decimals: 2 }) : '',
+  ].filter(Boolean);
+  return parts.length > 0
+    ? `Looks like a duplicate of ${parts.join(' · ')}`
+    : 'Looks like a duplicate of a receipt you already have';
 }

@@ -18,7 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { setStatusBarStyle } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
+import { scanReceipt, updateReceipt, deleteReceipt, DuplicateReceipt } from '../lib/api';
 import { AuthContext, isSignedIn } from '../lib/auth';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
@@ -29,6 +29,8 @@ import {
   categoryRowIcon,
   categoryRowLabel,
   commonCategory,
+  duplicateFrom,
+  duplicateWarningText,
   resizeTargetFor,
   resolveReceiptEdits,
   toScanResult,
@@ -122,6 +124,9 @@ export default function ScanScreen(): React.ReactElement {
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  // Backend's duplicate_of for this receipt, from the scan or from a save.
+  // `afterSave`: the receipt is already saved, so "Keep both" closes the card.
+  const [duplicate, setDuplicate] = useState<{ receipt: DuplicateReceipt; afterSave: boolean } | null>(null);
   const [frameHeight, setFrameHeight] = useState(0);
   const auth = useContext(AuthContext);
   const slideAnim = useRef(new Animated.Value(CARD_HIDDEN_OFFSET)).current;
@@ -136,8 +141,9 @@ export default function ScanScreen(): React.ReactElement {
     }, [])
   );
 
-  const showResultCard = (scanned: ScanResult) => {
+  const showResultCard = (scanned: ScanResult, duplicateOf: DuplicateReceipt | null = null) => {
     setResult(scanned);
+    setDuplicate(duplicateOf ? { receipt: duplicateOf, afterSave: false } : null);
     setEditedMerchant(scanned.merchant);
     setEditedTotal(formatCurrency(scanned.total, { decimals: 2 }));
     setEditedCategories(scanned.items.map((item) => item.category));
@@ -161,8 +167,8 @@ export default function ScanScreen(): React.ReactElement {
     setLoading(true);
     try {
       const base64 = await resizeForUpload(asset);
-      const { receipt } = await scanReceipt(base64, 'image/jpeg');
-      showResultCard(toScanResult(receipt));
+      const response = await scanReceipt(base64, 'image/jpeg');
+      showResultCard(toScanResult(response.receipt), duplicateFrom(response));
     } catch (err: unknown) {
       Alert.alert('Scan failed', errorMessage(err, 'Could not analyze this receipt.'));
     } finally {
@@ -211,6 +217,7 @@ export default function ScanScreen(): React.ReactElement {
     }).start(() => {
       setShowResult(false);
       setResult(null);
+      setDuplicate(null);
     });
   };
 
@@ -251,13 +258,30 @@ export default function ScanScreen(): React.ReactElement {
 
     setConfirming(true);
     try {
-      await updateReceipt(result.id, outcome.updates);
+      const response = await updateReceipt(result.id, outcome.updates);
+      const duplicateOf = duplicateFrom(response);
+      if (duplicateOf) {
+        // Saved, but it now looks like a duplicate: let the user decide
+        // before the card closes. The card now reflects the saved receipt,
+        // so another Save is a no-op.
+        setResult(toScanResult(response.receipt));
+        setDuplicate({ receipt: duplicateOf, afterSave: true });
+        return;
+      }
       handleDismiss();
     } catch (err: unknown) {
       Alert.alert('Failed to save changes', errorMessage(err, 'Please try again.'));
     } finally {
       setConfirming(false);
     }
+  };
+
+  // "Keep both": the new receipt stays. Before a save, just hide the warning
+  // and carry on editing; after a save there is nothing left to do, so close.
+  const handleKeepDuplicate = () => {
+    const afterSave = duplicate?.afterSave ?? false;
+    setDuplicate(null);
+    if (afterSave) handleDismiss();
   };
 
   const chooseCategory = (index: number, category: string) => {
@@ -393,6 +417,48 @@ export default function ScanScreen(): React.ReactElement {
               <MaterialCommunityIcons name="close" size={20} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
+
+          {duplicate ? (
+            <View
+              style={styles.duplicateWarning}
+              testID="scan-duplicate-warning"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              <View style={styles.duplicateMessageRow}>
+                <MaterialCommunityIcons name="content-duplicate" size={18} color={COLORS.alertTextColor} />
+                <Text style={styles.duplicateText} testID="scan-duplicate-text">
+                  {duplicateWarningText(duplicate.receipt)}
+                </Text>
+              </View>
+              <View style={styles.duplicateActions}>
+                <TouchableOpacity
+                  style={styles.duplicateButton}
+                  onPress={handleKeepDuplicate}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  testID="scan-duplicate-keep"
+                >
+                  <Text style={styles.duplicateKeepText}>Keep both</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.duplicateButton, styles.duplicateDiscardButton]}
+                  onPress={handleCancel}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy, busy: discarding }}
+                  testID="scan-duplicate-discard"
+                >
+                  {discarding ? (
+                    <ActivityIndicator size="small" color={COLORS.buttonText} />
+                  ) : (
+                    <Text style={styles.duplicateDiscardText}>Discard this one</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.resultRows}>
             <ResultRow label="Merchant">
@@ -665,6 +731,59 @@ const styles = StyleSheet.create({
   },
   resultRows: {
     marginBottom: SPACING.sectionMargin + 4,
+  },
+  // Duplicate warning (alert banner colors from the theme).
+  duplicateWarning: {
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 12,
+    borderRadius: RADIUS.card,
+    borderWidth: 1,
+    borderColor: COLORS.alertBorder,
+    backgroundColor: COLORS.alertBg,
+    gap: 10,
+  },
+  duplicateMessageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  duplicateText: {
+    flex: 1,
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.alertTextColor,
+  },
+  duplicateActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  duplicateButton: {
+    flex: 1,
+    height: 36,
+    borderRadius: RADIUS.input,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  duplicateDiscardButton: {
+    backgroundColor: COLORS.danger,
+    borderColor: COLORS.danger,
+  },
+  duplicateKeepText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  duplicateDiscardText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.buttonText,
   },
   resultRow: {
     flexDirection: 'row',

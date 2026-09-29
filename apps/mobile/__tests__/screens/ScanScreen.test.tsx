@@ -1203,3 +1203,175 @@ describe('ScanScreen — line items and category picker', () => {
     expect(StyleSheet.flatten(screen.getByTestId('scan-items-scroll').props.style).maxHeight).toBeGreaterThan(0);
   });
 });
+
+describe('ScanScreen — duplicate warning', () => {
+  const DUP = { id: 'old-1', merchant: 'SHUFERSAL DEAL', date: '2026-09-28', total: 72.6 };
+  const WARNING = 'Looks like a duplicate of SHUFERSAL DEAL · 28/09/2026 · ₪72.60';
+
+  function withDuplicate(response: ReturnType<typeof scanResponse>, duplicate_of: unknown = DUP) {
+    return { ...response, duplicate_of };
+  }
+
+  it('shows no warning when the scan has no duplicate (null or absent from an older backend)', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse(), null));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+
+    // Absent field (default scanResponse has no duplicate_of).
+    fireEvent.press(screen.getByTestId('scan-close-button'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    mockScanReceipt.mockResolvedValue(scanResponse());
+    await scanFromGallery();
+    expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+  });
+
+  it('warns on the result card with the duplicate merchant, date and total, plus both choices', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    renderScan();
+    await scanFromGallery();
+
+    const warning = screen.getByTestId('scan-duplicate-warning');
+    expect(within(warning).getByText(WARNING)).toBeTruthy();
+    expect(within(warning).getByTestId('scan-duplicate-keep')).toBeTruthy();
+    expect(within(warning).getByText('Keep both')).toBeTruthy();
+    expect(within(warning).getByTestId('scan-duplicate-discard')).toBeTruthy();
+    expect(within(warning).getByText('Discard this one')).toBeTruthy();
+    expect(warning.props.accessibilityRole).toBe('alert');
+    // The card itself is still there and editable.
+    expect(screen.getByTestId('scan-merchant-input').props.editable).toBe(true);
+  });
+
+  it('"Keep both" hides the warning and leaves the card open to continue normally', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-duplicate-keep'));
+
+    expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+    expect(screen.getByTestId('scan-result-card')).toBeTruthy();
+    expect(mockDeleteReceipt).not.toHaveBeenCalled();
+
+    // Continue normally: Save with an edit PATCHes and closes.
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'Rami Levy');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { merchant: 'Rami Levy' }));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('"Discard this one" deletes the new receipt (not the old one) and closes the card', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-duplicate-discard'));
+
+    await waitFor(() => expect(mockDeleteReceipt).toHaveBeenCalledWith('r1'));
+    expect(mockDeleteReceipt).not.toHaveBeenCalledWith('old-1');
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(mockUpdateReceipt).not.toHaveBeenCalled();
+  });
+
+  it('locks both choices while discarding, and keeps the warning if the delete fails', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    mockDeleteReceipt.mockRejectedValueOnce({ message: 'Not found' });
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-duplicate-discard'));
+    expect(screen.getByTestId('scan-duplicate-keep').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true })
+    );
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to discard', 'Not found'));
+    expect(screen.getByTestId('scan-duplicate-warning')).toBeTruthy();
+    expect(screen.getByTestId('scan-duplicate-discard').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false })
+    );
+  });
+
+  it('after a save whose response has duplicate_of, shows the warning again instead of closing', async () => {
+    mockUpdateReceipt.mockResolvedValue(withDuplicate(scanResponse({ merchant: 'SHUFERSAL DEAL' })));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'SHUFERSAL DEAL');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    expect(await screen.findByTestId('scan-duplicate-warning')).toBeTruthy();
+    expect(screen.getByText(WARNING)).toBeTruthy();
+    expect(screen.getByTestId('scan-result-card')).toBeTruthy();
+    expect(mockUpdateReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a save, "Keep both" closes the card without another request', async () => {
+    mockUpdateReceipt.mockResolvedValue(withDuplicate(scanResponse({ merchant: 'SHUFERSAL DEAL' })));
+    renderScan();
+    await scanFromGallery();
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'SHUFERSAL DEAL');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await screen.findByTestId('scan-duplicate-warning');
+
+    fireEvent.press(screen.getByTestId('scan-duplicate-keep'));
+
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(mockUpdateReceipt).toHaveBeenCalledTimes(1);
+    expect(mockDeleteReceipt).not.toHaveBeenCalled();
+  });
+
+  it('after a save, "Discard this one" deletes the saved receipt and closes the card', async () => {
+    mockUpdateReceipt.mockResolvedValue(withDuplicate(scanResponse({ merchant: 'SHUFERSAL DEAL' })));
+    renderScan();
+    await scanFromGallery();
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'SHUFERSAL DEAL');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await screen.findByTestId('scan-duplicate-warning');
+
+    fireEvent.press(screen.getByTestId('scan-duplicate-discard'));
+
+    await waitFor(() => expect(mockDeleteReceipt).toHaveBeenCalledWith('r1'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('after a save warning, pressing Save again sends nothing more and closes', async () => {
+    mockUpdateReceipt.mockResolvedValue(withDuplicate(scanResponse({ merchant: 'SHUFERSAL DEAL' })));
+    renderScan();
+    await scanFromGallery();
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'SHUFERSAL DEAL');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await screen.findByTestId('scan-duplicate-warning');
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(mockUpdateReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a save without duplicate_of closes the card as before', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    mockUpdateReceipt.mockResolvedValue(withDuplicate(scanResponse({ merchant: 'Other' }), null));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'Other');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('a new scan does not inherit the previous scan\'s warning', async () => {
+    mockScanReceipt.mockResolvedValue(withDuplicate(scanResponse()));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.getByTestId('scan-duplicate-warning')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('scan-close-button'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+
+    mockScanReceipt.mockResolvedValue(scanResponse());
+    await scanFromGallery();
+    expect(screen.queryByTestId('scan-duplicate-warning')).toBeNull();
+  });
+});

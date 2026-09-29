@@ -288,6 +288,35 @@ describe('lib/api', () => {
       expect(options.headers.Authorization).toBe('Bearer tok');
       expect(JSON.parse(options.body)).toEqual({ image: 'base64data', mediaType: 'image/jpeg' });
     });
+
+    it('passes duplicate_of through (and leaves it undefined for an older backend)', async () => {
+      const receipt = {
+        id: 'r2',
+        user_id: 'u1',
+        raw_response: { merchant: 'Store', total: 10, date: '2026-01-01', items: [] },
+        created_at: '2026-01-01T00:00:00Z',
+        image_path: null,
+      };
+      const duplicate_of = { id: 'r1', merchant: 'Store', date: '2026-01-01', total: 10 };
+      mockFetchOnce(201, { receipt, duplicate_of });
+      await expect(scanReceipt('b64', 'image/jpeg')).resolves.toEqual({ receipt, duplicate_of });
+
+      mockFetchOnce(201, { receipt });
+      const older = await scanReceipt('b64', 'image/jpeg');
+      expect(older.duplicate_of).toBeUndefined();
+    });
+
+    it('updateReceipt passes duplicate_of through too', async () => {
+      const receipt = {
+        id: 'r2',
+        user_id: 'u1',
+        raw_response: { merchant: 'Store', total: 10, date: '2026-01-01', items: [] },
+        created_at: '2026-01-01T00:00:00Z',
+        image_path: null,
+      };
+      mockFetchOnce(200, { receipt, duplicate_of: null });
+      await expect(updateReceipt('r2', { merchant: 'Store' })).resolves.toEqual({ receipt, duplicate_of: null });
+    });
   });
 
   describe('getReceipts', () => {

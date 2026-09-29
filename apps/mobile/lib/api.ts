@@ -204,8 +204,22 @@ export interface Receipt {
   image_path: string | null;
 }
 
+/** An existing receipt the backend thinks a new/edited one duplicates. */
+export interface DuplicateReceipt {
+  id: string;
+  merchant: string;
+  date: string;
+  total: number;
+}
+
+/** Response of POST /receipts/scan and PATCH /receipts/:id. */
 export interface ScanReceiptResponse {
   receipt: Receipt;
+  /**
+   * Set when the receipt looks like one the user already has. Absent from an
+   * older backend (treat like null).
+   */
+  duplicate_of?: DuplicateReceipt | null;
 }
 
 export interface GetReceiptsResponse {
