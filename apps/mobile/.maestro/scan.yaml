@@ -1,5 +1,6 @@
 # Scan from the gallery: pick the newest photo, wait for Claude's result card,
-# check the merchant was extracted, then save.
+# check the merchant was extracted, then save it, or discard it if the backend
+# flags it as a duplicate of an earlier receipt.
 #
 # NOT part of the default run (tag `scan`): it calls the real Claude API via
 # the backend and adds a receipt to the test account.
@@ -47,9 +48,27 @@ tags:
     text: ".*\\S.*"
 - assertVisible:
     id: "scan-save-button"
-- tapOn:
-    id: "scan-save-button"
-# Saving (or saving with no edits) slides the card away.
+# New receipt: save it.
+- runFlow:
+    when:
+      notVisible:
+        id: "scan-duplicate-warning"
+    commands:
+      - tapOn:
+          id: "scan-save-button"
+# Same image scanned again: the backend flags it as a duplicate. Discard the
+# new copy, which also keeps the test account from filling up with copies.
+- runFlow:
+    when:
+      visible:
+        id: "scan-duplicate-warning"
+    commands:
+      - assertVisible:
+          id: "scan-duplicate-text"
+          text: "Looks like a duplicate of .*"
+      - tapOn:
+          id: "scan-duplicate-discard"
+# Saving or discarding slides the card away.
 - extendedWaitUntil:
     notVisible:
       id: "scan-result-card"
