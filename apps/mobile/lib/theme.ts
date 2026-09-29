@@ -42,6 +42,8 @@ export const COLORS = {
   heroStatsRowBg: 'rgba(255, 255, 255, 0.08)',
   heroStatsDivider: 'rgba(255, 255, 255, 0.2)',
   heroStatsLabel: 'rgba(255, 255, 255, 0.6)',
+  // Loading placeholder bars on the dark hero card (Dashboard first load).
+  heroSkeleton: 'rgba(255, 255, 255, 0.16)',
 };
 
 export const RADIUS = {

@@ -9,6 +9,7 @@ import {
   Modal,
   Image,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,7 +18,15 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { AuthContext, isSignedIn } from '../lib/auth';
 import type { MainTabParamList } from '../lib/navigation';
 import { initialsFor } from '../lib/profile';
-import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget, updateItemCategories } from '../lib/api';
+import {
+  getReceipts,
+  getReceiptImageUrl,
+  Receipt,
+  getBudgets,
+  Budget,
+  updateItemCategories,
+  deleteReceipt,
+} from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, RADIUS, budgetBarColor } from '../lib/theme';
 import { RECEIPT_CATEGORIES, categoryMeta } from '../lib/categories';
@@ -108,14 +117,21 @@ const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ rece
   );
 };
 
+/** The image route answers 404 when the receipt was saved without a photo — a normal state, not an error. */
+const NO_STORED_IMAGE_MESSAGE = 'This receipt has no stored image';
+
 const ReceiptImageModal: React.FC<{
   receipt: Receipt;
   onClose: () => void;
   onReceiptUpdated: (receipt: Receipt) => void;
-}> = ({ receipt, onClose, onReceiptUpdated }) => {
+  onReceiptDeleted: (id: string) => void;
+}> = ({ receipt, onClose, onReceiptUpdated, onReceiptDeleted }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [noImage, setNoImage] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [saveError, setSaveError] = useState('');
@@ -145,18 +161,46 @@ const ReceiptImageModal: React.FC<{
     }
   };
 
+  const deleteNow = async () => {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteReceipt(receipt.id);
+      // The Dashboard closes this modal and refreshes.
+      if (mounted.current) onReceiptDeleted(receipt.id);
+    } catch (err: unknown) {
+      if (mounted.current) setDeleteError(errorMessage(err, 'Could not delete the receipt. Please try again.'));
+    } finally {
+      if (mounted.current) setDeleting(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    Alert.alert(
+      'Delete receipt?',
+      "This receipt and its items will be permanently deleted. This can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void deleteNow() },
+      ]
+    );
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setNoImage(false);
     setImageUrl(null);
 
     getReceiptImageUrl(receipt.id)
       .then((url) => {
         if (!cancelled) setImageUrl(url);
       })
-      .catch((err: any) => {
-        if (!cancelled) setError(err.message || 'No image available for this receipt');
+      .catch((err: { message?: string; code?: number | string } | undefined) => {
+        if (cancelled) return;
+        if (err?.code === 404) setNoImage(true);
+        else setError(err?.message || 'No image available for this receipt');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -185,7 +229,7 @@ const ReceiptImageModal: React.FC<{
                 {formatReceiptDate(receipt)} · {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} testID="receipt-modal-close">
+            <TouchableOpacity onPress={onClose} disabled={deleting} testID="receipt-modal-close">
               <MaterialCommunityIcons name="close" size={24} color={COLORS.textPrimary} />
             </TouchableOpacity>
           </View>
@@ -210,11 +254,41 @@ const ReceiptImageModal: React.FC<{
             <View style={styles.modalImageContainer}>
               {loading && <ActivityIndicator color={COLORS.button} />}
               {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {!loading && noImage ? (
+                <View style={styles.noImage} testID="receipt-modal-no-image">
+                  <MaterialCommunityIcons name="image-off-outline" size={28} color={COLORS.textSecondary} />
+                  <Text style={styles.noImageText}>{NO_STORED_IMAGE_MESSAGE}</Text>
+                </View>
+              ) : null}
               {!loading && imageUrl ? (
                 <Image source={{ uri: imageUrl }} style={styles.modalImage} resizeMode="contain" />
               ) : null}
             </View>
           </ScrollView>
+
+          {deleteError ? (
+            <Text style={[styles.errorText, styles.deleteError]} testID="receipt-delete-error">
+              {deleteError}
+            </Text>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.deleteButton, deleting && styles.deleteButtonDisabled]}
+            onPress={confirmDelete}
+            disabled={deleting}
+            accessibilityRole="button"
+            accessibilityLabel="Delete receipt"
+            accessibilityState={{ disabled: deleting, busy: deleting }}
+            testID="receipt-delete-button"
+          >
+            {deleting ? (
+              <ActivityIndicator color={COLORS.danger} testID="receipt-deleting" />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLORS.danger} />
+                <Text style={styles.deleteButtonText}>Delete receipt</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -245,7 +319,15 @@ export default function DashboardScreen(): React.ReactElement {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Hero summary: 'pending' until the first load settles, so the card shows
+  // a placeholder instead of ₪0 / 0 receipts right after sign-in. Real zeros
+  // only once data has loaded ('ready'); '—' if the first load failed.
+  // Later reloads keep the previous numbers on screen.
+  const [summary, setSummary] = useState<'pending' | 'ready' | 'failed'>('pending');
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  // Each load takes a number; only the latest may write state. Bumped on
+  // blur/unmount so a response for a screen that went away is ignored.
+  const loadSeq = useRef(0);
   // Derived from `receipts` so a saved category change shows in the open modal too.
   const selectedReceipt = receipts.find((r) => r.id === selectedReceiptId) ?? null;
 
@@ -253,35 +335,57 @@ export default function DashboardScreen(): React.ReactElement {
     setReceipts((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-
-      async function load() {
-        if (!hasSession) return;
+  /**
+   * Fetch receipts + budgets. `quiet` (refresh after a delete) keeps the
+   * current lists on screen instead of swapping them for the spinner, and
+   * leaves the on-screen data alone if the refresh fails.
+   */
+  const load = useCallback(
+    async ({ quiet = false }: { quiet?: boolean } = {}) => {
+      if (!hasSession) return;
+      const seq = ++loadSeq.current;
+      const current = () => seq === loadSeq.current;
+      if (!quiet) {
         setLoading(true);
         setError('');
-        try {
-          const [receiptsRes, budgetsRes] = await Promise.all([
-            getReceipts(),
-            getBudgets(),
-          ]);
-          if (!cancelled) {
-            setReceipts(receiptsRes.receipts);
-            setBudgets(budgetsRes.budgets);
-          }
-        } catch (err: any) {
-          if (!cancelled) setError(err.message || 'Failed to load receipts');
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
       }
+      try {
+        const [receiptsRes, budgetsRes] = await Promise.all([getReceipts(), getBudgets()]);
+        if (current()) {
+          setReceipts(receiptsRes.receipts);
+          setBudgets(budgetsRes.budgets);
+          setSummary('ready');
+        }
+      } catch (err: any) {
+        if (current() && !quiet) {
+          setError(err?.message || 'Failed to load receipts');
+          setSummary((prev) => (prev === 'pending' ? 'failed' : prev));
+        }
+      } finally {
+        if (current() && !quiet) setLoading(false);
+      }
+    },
+    [hasSession]
+  );
 
+  useFocusEffect(
+    useCallback(() => {
       load();
       return () => {
-        cancelled = true;
+        loadSeq.current++;
       };
-    }, [hasSession, hasAccessToken])
+    }, [load, hasAccessToken])
+  );
+
+  // Receipt deleted from the modal: close it, drop the row right away, then
+  // refresh so totals/categories come from the server.
+  const handleReceiptDeleted = useCallback(
+    (id: string) => {
+      setSelectedReceiptId(null);
+      setReceipts((prev) => prev.filter((r) => r.id !== id));
+      load({ quiet: true });
+    },
+    [load]
   );
 
   const now = new Date();
@@ -295,6 +399,7 @@ export default function DashboardScreen(): React.ReactElement {
   // With no budget, "0% used" would read as "on track" — show a dash and
   // make the stat a shortcut to setting one up instead.
   const hasBudget = totalBudget > 0;
+  const failed = summary === 'failed';
 
   const categoryTotals = sortedCategoryTotals(monthReceipts);
   const budgetsByCategory = indexBudgetsByCategory(budgets);
@@ -326,44 +431,80 @@ export default function DashboardScreen(): React.ReactElement {
           end={{ x: 1, y: 1 }}
           style={styles.heroCard}
         >
-          <View style={styles.heroCardContent}>
-            <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
-            <Text style={styles.heroAmount} testID="hero-spent">{formatCurrency(totalSpent)}</Text>
-            {totalBudget > 0 && (
-              <Text style={styles.heroSubtitle}>of {formatCurrency(totalBudget)} budget</Text>
-            )}
-
-            {/* Stats row */}
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue} testID="hero-week">{formatCurrency(thisWeekSpent)}</Text>
-                <Text style={styles.statLabel}>This week</Text>
-              </View>
-              <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue} testID="hero-count">{monthReceipts.length}</Text>
-                <Text style={styles.statLabel}>Receipts</Text>
-              </View>
-              <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
-              {hasBudget ? (
-                <View style={styles.statItem} testID="hero-budget-stat">
-                  <Text style={styles.statValue} testID="hero-budget-pct">{Math.round(budgetPercentage)}%</Text>
-                  <Text style={styles.statLabel} testID="hero-budget-label">Budget used</Text>
+          {summary === 'pending' ? (
+            // First load in flight: placeholders, never ₪0 / 0 receipts.
+            <View
+              style={styles.heroCardContent}
+              testID="hero-loading"
+              accessible
+              accessibilityLabel="Loading your spending"
+              accessibilityState={{ busy: true }}
+            >
+              <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
+              <View style={styles.heroSkeletonAmount} testID="hero-spent-skeleton" />
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <View style={styles.heroSkeletonStat} />
+                  <Text style={styles.statLabel}>This week</Text>
                 </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.statItem}
-                  onPress={() => navigation.navigate('Budget')}
-                  accessibilityRole="button"
-                  accessibilityLabel="No budget set. Set a budget"
-                  testID="hero-budget-stat"
-                >
-                  <Text style={styles.statValue} testID="hero-budget-pct">—</Text>
-                  <Text style={styles.statLabel} testID="hero-budget-label">No budget</Text>
-                </TouchableOpacity>
-              )}
+                <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+                <View style={styles.statItem}>
+                  <View style={styles.heroSkeletonStat} />
+                  <Text style={styles.statLabel}>Receipts</Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+                <View style={styles.statItem}>
+                  <View style={styles.heroSkeletonStat} />
+                  <Text style={styles.statLabel}>Budget</Text>
+                </View>
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.heroCardContent}>
+              <Text style={styles.heroLabel}>SPENT THIS MONTH</Text>
+              <Text style={styles.heroAmount} testID="hero-spent">{failed ? '—' : formatCurrency(totalSpent)}</Text>
+              {totalBudget > 0 && (
+                <Text style={styles.heroSubtitle}>of {formatCurrency(totalBudget)} budget</Text>
+              )}
+
+              {/* Stats row */}
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue} testID="hero-week">{failed ? '—' : formatCurrency(thisWeekSpent)}</Text>
+                  <Text style={styles.statLabel}>This week</Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue} testID="hero-count">{failed ? '—' : monthReceipts.length}</Text>
+                  <Text style={styles.statLabel}>Receipts</Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: COLORS.heroStatsDivider }]} />
+                {failed ? (
+                  // Budgets unknown: neither a % nor the "set a budget" shortcut.
+                  <View style={styles.statItem} testID="hero-budget-stat">
+                    <Text style={styles.statValue} testID="hero-budget-pct">—</Text>
+                    <Text style={styles.statLabel} testID="hero-budget-label">Budget</Text>
+                  </View>
+                ) : hasBudget ? (
+                  <View style={styles.statItem} testID="hero-budget-stat">
+                    <Text style={styles.statValue} testID="hero-budget-pct">{Math.round(budgetPercentage)}%</Text>
+                    <Text style={styles.statLabel} testID="hero-budget-label">Budget used</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.statItem}
+                    onPress={() => navigation.navigate('Budget')}
+                    accessibilityRole="button"
+                    accessibilityLabel="No budget set. Set a budget"
+                    testID="hero-budget-stat"
+                  >
+                    <Text style={styles.statValue} testID="hero-budget-pct">—</Text>
+                    <Text style={styles.statLabel} testID="hero-budget-label">No budget</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
         </LinearGradient>
 
         {loading && (
@@ -426,6 +567,7 @@ export default function DashboardScreen(): React.ReactElement {
           receipt={selectedReceipt}
           onClose={() => setSelectedReceiptId(null)}
           onReceiptUpdated={replaceReceipt}
+          onReceiptDeleted={handleReceiptDeleted}
         />
       )}
     </SafeAreaView>
@@ -726,5 +868,50 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 320,
     borderRadius: 8,
+  },
+  // Receipt saved without a photo: a normal state, so neutral secondary
+  // text (not the red error style).
+  noImage: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  noImageText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  deleteError: {
+    marginTop: 12,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 44,
+    marginTop: 12,
+    borderRadius: RADIUS.button,
+    backgroundColor: COLORS.errorBg,
+  },
+  deleteButtonDisabled: {
+    opacity: 0.6,
+  },
+  deleteButtonText: {
+    color: COLORS.danger,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  heroSkeletonAmount: {
+    width: 140,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: COLORS.heroSkeleton,
+  },
+  heroSkeletonStat: {
+    width: 44,
+    height: 14,
+    marginVertical: 2,
+    borderRadius: 4,
+    backgroundColor: COLORS.heroSkeleton,
   },
 });

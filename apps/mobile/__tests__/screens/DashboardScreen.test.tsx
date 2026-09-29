@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet } from 'react-native';
+import { Alert, Image, StyleSheet } from 'react-native';
 import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react-native';
 import { budgetBarColor, COLORS } from '../../lib/theme';
 
@@ -21,7 +21,9 @@ const mockGetReceipts = jest.fn();
 const mockGetReceiptImageUrl = jest.fn();
 const mockGetBudgets = jest.fn();
 const mockUpdateItemCategories = jest.fn();
+const mockDeleteReceipt = jest.fn();
 jest.mock('../../lib/api', () => ({
+  deleteReceipt: (...args: unknown[]) => mockDeleteReceipt(...args),
   getReceipts: (...args: unknown[]) => mockGetReceipts(...args),
   getReceiptImageUrl: (...args: unknown[]) => mockGetReceiptImageUrl(...args),
   getBudgets: (...args: unknown[]) => mockGetBudgets(...args),
@@ -1280,3 +1282,271 @@ describe('DashboardScreen', () => {
   });
 });
 
+describe('DashboardScreen first load (no ₪0 flash)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  it('shows a placeholder in the summary card, not zeros, while the first load is pending', async () => {
+    mockGetReceipts.mockReturnValue(new Promise(() => {}));
+    mockGetBudgets.mockReturnValue(new Promise(() => {}));
+
+    renderDashboard();
+
+    expect(screen.getByTestId('hero-loading')).toBeTruthy();
+    expect(screen.getByTestId('hero-spent-skeleton')).toBeTruthy();
+    expect(screen.getByTestId('hero-loading').props.accessibilityLabel).toBe('Loading your spending');
+    for (const id of ['hero-spent', 'hero-week', 'hero-count', 'hero-budget-pct', 'hero-budget-stat']) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+    expect(screen.queryByText('₪0')).toBeNull();
+    expect(screen.queryByText('0')).toBeNull();
+    expect(screen.queryByText('No budget')).toBeNull();
+    // Labels stay so the card keeps its shape.
+    expect(screen.getByText('SPENT THIS MONTH')).toBeTruthy();
+    expect(screen.getByText('This week')).toBeTruthy();
+  });
+
+  it('swaps the placeholder for the real numbers once data arrives', async () => {
+    let resolveReceipts!: (v: unknown) => void;
+    mockGetReceipts.mockReturnValue(new Promise((r) => (resolveReceipts = r)));
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+    renderDashboard();
+    expect(screen.getByTestId('hero-loading')).toBeTruthy();
+
+    await act(async () => {
+      resolveReceipts({ receipts: [receipt('r1', { date: '2026-01-20', total: 72.6 })] });
+    });
+
+    expect(screen.queryByTestId('hero-loading')).toBeNull();
+    expect(textOf('hero-spent')).toBe('₪73');
+    expect(textOf('hero-count')).toBe('1');
+  });
+
+  it('shows real zeros once loaded data really is empty', async () => {
+    mockGetReceipts.mockResolvedValue({ receipts: [] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+    renderDashboard();
+
+    await waitFor(() => expect(screen.queryByTestId('hero-loading')).toBeNull());
+    expect(textOf('hero-spent')).toBe('₪0');
+    expect(textOf('hero-week')).toBe('₪0');
+    expect(textOf('hero-count')).toBe('0');
+  });
+
+  it('shows dashes (not zeros) when the first load fails', async () => {
+    mockGetReceipts.mockRejectedValue({ message: 'Failed to load receipts' });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+    renderDashboard();
+
+    await waitFor(() => expect(screen.getByText('Failed to load receipts')).toBeTruthy());
+    expect(screen.queryByTestId('hero-loading')).toBeNull();
+    expect(textOf('hero-spent')).toBe('—');
+    expect(textOf('hero-week')).toBe('—');
+    expect(textOf('hero-count')).toBe('—');
+    expect(textOf('hero-budget-pct')).toBe('—');
+    expect(textOf('hero-budget-label')).toBe('Budget');
+    expect(screen.queryByText('₪0')).toBeNull();
+  });
+});
+
+describe('DashboardScreen receipt modal: delete receipt', () => {
+  type AlertButton = { text?: string; style?: string; onPress?: () => void };
+  let alertSpy: jest.SpyInstance;
+
+  const R1 = receipt('r1', {
+    date: '2026-01-20',
+    total: 100,
+    merchant: 'Rami Levy',
+    items: [{ name: 'Milk', amount: 100, category: 'Groceries' }],
+  });
+  const R2 = receipt('r2', {
+    date: '2026-01-19',
+    total: 50,
+    merchant: 'Cafe Aroma',
+    items: [{ name: 'Coffee', amount: 50, category: 'Dining' }],
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+    alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    alertSpy.mockRestore();
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  async function openR1() {
+    mockGetReceipts.mockResolvedValue({ receipts: [R1, R2] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r1.jpg');
+    renderDashboard();
+    fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+    await screen.findByTestId('receipt-modal-close');
+    await waitFor(() => expect(screen.UNSAFE_getByType(Image)).toBeTruthy());
+  }
+
+  function deleteButtons(): AlertButton[] {
+    const call = alertSpy.mock.calls.filter((c) => c[0] === 'Delete receipt?').pop();
+    if (!call) throw new Error('Delete confirmation was not shown');
+    return call[2] as AlertButton[];
+  }
+
+  function choose(text: string) {
+    const button = deleteButtons().find((b) => b.text === text);
+    act(() => {
+      button?.onPress?.();
+    });
+  }
+
+  it('shows a Delete action in the modal', async () => {
+    await openR1();
+    const button = screen.getByTestId('receipt-delete-button');
+    expect(button.props.accessibilityRole).toBe('button');
+    expect(within(button).getByText('Delete receipt')).toBeTruthy();
+  });
+
+  it('asks for confirmation (Cancel + destructive Delete) before deleting', async () => {
+    await openR1();
+
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    const [title, message, buttons] = alertSpy.mock.calls[0];
+    expect(title).toBe('Delete receipt?');
+    expect(message).toMatch(/can't be undone/);
+    expect(buttons).toEqual([
+      expect.objectContaining({ text: 'Cancel', style: 'cancel' }),
+      expect.objectContaining({ text: 'Delete', style: 'destructive' }),
+    ]);
+    expect(mockDeleteReceipt).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the confirmation is cancelled', async () => {
+    await openR1();
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    choose('Cancel');
+
+    expect(mockDeleteReceipt).not.toHaveBeenCalled();
+    expect(screen.getByTestId('receipt-modal-close')).toBeTruthy();
+  });
+
+  it('deletes on confirm, closes the modal and refreshes the Dashboard', async () => {
+    await openR1();
+    expect(textOf('hero-spent')).toBe('₪150');
+    expect(mockGetReceipts).toHaveBeenCalledTimes(1);
+
+    mockDeleteReceipt.mockResolvedValue(undefined);
+    mockGetReceipts.mockResolvedValue({ receipts: [R2] });
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    choose('Delete');
+
+    await waitFor(() => expect(mockDeleteReceipt).toHaveBeenCalledWith('r1'));
+    await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+    expect(screen.queryByTestId('receipt-item-r1')).toBeNull();
+    expect(screen.getByTestId('receipt-item-r2')).toBeTruthy();
+    await waitFor(() => expect(mockGetReceipts).toHaveBeenCalledTimes(2));
+    expect(mockGetBudgets).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(textOf('hero-spent')).toBe('₪50'));
+    // A quiet refresh: the summary never falls back to the placeholder.
+    expect(screen.queryByTestId('hero-loading')).toBeNull();
+  });
+
+  it('shows a spinner and blocks a second delete while in flight', async () => {
+    await openR1();
+    let finish!: () => void;
+    mockDeleteReceipt.mockReturnValue(new Promise<void>((r) => (finish = r)));
+
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    choose('Delete');
+
+    expect(await screen.findByTestId('receipt-deleting')).toBeTruthy();
+    expect(screen.getByTestId('receipt-delete-button').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true })
+    );
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish();
+    });
+    await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+  });
+
+  it('shows the error in the modal and keeps it open when the delete fails', async () => {
+    await openR1();
+    mockDeleteReceipt.mockRejectedValue({ message: 'Failed to delete receipt' });
+
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    choose('Delete');
+
+    expect(await screen.findByTestId('receipt-delete-error')).toBeTruthy();
+    expect(textOf('receipt-delete-error')).toBe('Failed to delete receipt');
+    expect(StyleSheet.flatten(screen.getByTestId('receipt-delete-error').props.style).color).toBe(COLORS.danger);
+    expect(screen.getByTestId('receipt-modal-close')).toBeTruthy();
+    expect(screen.getByTestId('receipt-item-r1')).toBeTruthy();
+    expect(screen.getByTestId('receipt-delete-button').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false })
+    );
+    expect(mockGetReceipts).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to a generic error message', async () => {
+    await openR1();
+    mockDeleteReceipt.mockRejectedValue({});
+
+    fireEvent.press(screen.getByTestId('receipt-delete-button'));
+    choose('Delete');
+
+    await waitFor(() =>
+      expect(textOf('receipt-delete-error')).toBe('Could not delete the receipt. Please try again.')
+    );
+  });
+});
+
+describe('DashboardScreen receipt modal: no stored image', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  async function openWithImageError(err: unknown) {
+    mockGetReceipts.mockResolvedValue({ receipts: [receipt('r1', { date: '2026-01-20', total: 10 })] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+    mockGetReceiptImageUrl.mockRejectedValue(err);
+    renderDashboard();
+    fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+  }
+
+  it('shows the 404 "no stored image" state as neutral secondary text with an image-off icon', async () => {
+    await openWithImageError({ message: 'This receipt has no stored image', code: 404 });
+
+    const noImage = await screen.findByTestId('receipt-modal-no-image');
+    const text = within(noImage).getByText('This receipt has no stored image');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(COLORS.textSecondary);
+    expect(StyleSheet.flatten(text.props.style).color).not.toBe(COLORS.danger);
+    expect(within(noImage).UNSAFE_getByProps({ name: 'image-off-outline' }).props.color).toBe(COLORS.textSecondary);
+  });
+
+  it('still shows a real failure (not 404) as an error', async () => {
+    await openWithImageError({ message: 'Failed to load receipt image', code: 500 });
+
+    const text = await screen.findByText('Failed to load receipt image');
+    expect(StyleSheet.flatten(text.props.style).color).toBe(COLORS.danger);
+    expect(screen.queryByTestId('receipt-modal-no-image')).toBeNull();
+  });
+});
