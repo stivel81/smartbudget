@@ -17,6 +17,10 @@ import {
   getBudgets,
   upsertBudget,
   deleteBudget,
+  getCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
   logout,
   API_BASE_URL,
   setAccessTokenProvider,
@@ -584,6 +588,54 @@ describe('lib/api', () => {
         expected: undefined,
         fallback: 'Failed to delete budget',
       },
+      {
+        name: 'upsertBudget by category id',
+        call: () => upsertBudget({ categoryId: 'c-pets' }, 120),
+        url: '/api/v1/budgets',
+        method: 'POST',
+        body: { category_id: 'c-pets', monthlyLimit: 120 },
+        okBody: { budget: { id: 'b2', category: 'Pets', category_id: 'c-pets' } },
+        expected: { budget: { id: 'b2', category: 'Pets', category_id: 'c-pets' } },
+        fallback: 'Failed to save budget',
+      },
+      {
+        name: 'getCategories',
+        call: () => getCategories(),
+        url: '/api/v1/categories',
+        method: 'GET',
+        okBody: { categories: [{ id: 'c1', name: 'Pets' }] },
+        expected: { categories: [{ id: 'c1', name: 'Pets' }] },
+        fallback: 'Failed to load categories',
+      },
+      {
+        name: 'createCategory',
+        call: () => createCategory({ name: 'Pets', icon: 'paw', color: '#0F6E56' }),
+        url: '/api/v1/categories',
+        method: 'POST',
+        body: { name: 'Pets', icon: 'paw', color: '#0F6E56' },
+        okBody: { category: { id: 'c1', name: 'Pets' } },
+        expected: { category: { id: 'c1', name: 'Pets' } },
+        fallback: 'Failed to create category',
+      },
+      {
+        name: 'updateCategory',
+        call: () => updateCategory('c1', { name: 'Animals' }),
+        url: '/api/v1/categories/c1',
+        method: 'PATCH',
+        body: { name: 'Animals' },
+        okBody: { category: { id: 'c1', name: 'Animals' } },
+        expected: { category: { id: 'c1', name: 'Animals' } },
+        fallback: 'Failed to update category',
+      },
+      {
+        name: 'deleteCategory',
+        call: () => deleteCategory('c1'),
+        url: '/api/v1/categories/c1',
+        method: 'DELETE',
+        okBody: {},
+        expected: undefined,
+        fallback: 'Failed to delete category',
+      },
     ];
 
     describe.each(cases)('$name', ({ call, url, method, body, okBody, expected, fallback }) => {
@@ -874,6 +926,47 @@ describe('lib/api', () => {
       mockFetchOnce(500, {});
 
       await expect((call as () => Promise<unknown>)()).rejects.toEqual({ message: fallback, code: 500 });
+    });
+  });
+
+  describe('categories: error codes the UI relies on', () => {
+    it.each([
+      [400, { error: 'color must be null or a hex color like #1A2B3C', status: 400 }],
+      [409, { error: 'A category named "Pets" already exists', status: 409 }],
+    ])('createCategory rejects with code %i and the server message', async (status, body) => {
+      mockFetchOnce(status, body);
+      await expect(createCategory({ name: 'Pets' })).rejects.toEqual({ message: body.error, code: status });
+    });
+
+    it.each([
+      [403, 'Built-in categories cannot be changed'],
+      [404, 'Category not found'],
+      [409, 'A category named "Dining" already exists'],
+    ])('updateCategory rejects with code %i', async (status, error) => {
+      mockFetchOnce(status, { error, status });
+      await expect(updateCategory('c1', { name: 'Dining' })).rejects.toEqual({ message: error, code: status });
+    });
+
+    it.each([403, 404])('deleteCategory rejects with code %i', async (status) => {
+      mockFetchOnce(status, { error: 'nope', status });
+      await expect(deleteCategory('c1')).rejects.toMatchObject({ code: status });
+    });
+
+    it('url-encodes the category id', async () => {
+      mockFetchOnce(200, { category: { id: 'a/b' } });
+      await updateCategory('a/b', { color: '#DB2777' });
+      expect(fetchCall(0)[0]).toBe(`${API_BASE_URL}/api/v1/categories/a%2Fb`);
+    });
+
+    it('a 204 delete resolves without reading a body', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 204,
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        },
+      }) as jest.Mock;
+      await expect(deleteCategory('c1')).resolves.toBeUndefined();
     });
   });
 });

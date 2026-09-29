@@ -241,7 +241,10 @@ export function getReceipts(): Promise<GetReceiptsResponse> {
   return authedRequest('/api/v1/receipts', {}, 'Failed to load receipts');
 }
 
-/** Re-categorize one line item: raw_response.items[index].category = category. */
+/**
+ * Re-categorize one line item: raw_response.items[index].category = category.
+ * `category` is a NAME: a base one or one of the user's custom categories.
+ */
 export interface ItemCategoryUpdate {
   index: number;
   category: string;
@@ -280,7 +283,10 @@ export function deleteReceipt(id: string): Promise<void> {
 export interface Budget {
   id: string;
   user_id: string;
+  /** The category's name (base or custom). */
   category: string;
+  /** The category's id (absent from an older backend). */
+  category_id?: string | null;
   monthly_limit: number;
   created_at: string;
   updated_at: string;
@@ -298,12 +304,92 @@ export function getBudgets(): Promise<GetBudgetsResponse> {
   return authedRequest('/api/v1/budgets', {}, 'Failed to load budgets');
 }
 
-export function upsertBudget(category: string, monthlyLimit: number): Promise<UpsertBudgetResponse> {
-  return authedRequest('/api/v1/budgets', { method: 'POST', body: { category, monthlyLimit } }, 'Failed to save budget');
+/** Which category a budget is for: its id (preferred) or, for older callers, its name. */
+export type BudgetCategoryRef = string | { categoryId: string };
+
+/**
+ * Create or replace the monthly limit for one category. Pass
+ * `{ categoryId }` (works for base and custom categories); a plain string is
+ * sent as the category name.
+ */
+export function upsertBudget(category: BudgetCategoryRef, monthlyLimit: number): Promise<UpsertBudgetResponse> {
+  const body =
+    typeof category === 'string'
+      ? { category, monthlyLimit }
+      : { category_id: category.categoryId, monthlyLimit };
+  return authedRequest('/api/v1/budgets', { method: 'POST', body }, 'Failed to save budget');
 }
 
 export function deleteBudget(id: string): Promise<void> {
   return authedRequestNoContent(`/api/v1/budgets/${id}`, { method: 'DELETE' }, 'Failed to delete budget');
+}
+
+// ---------------------------------------------------------------------------
+// Spending categories (base + the user's custom ones)
+//
+// Errors are ApiError with `code` = HTTP status:
+//   400 validation (name 1-30 chars after trim, color #RRGGBB, icon 1-64 chars)
+//   403 a built-in (base) category can't be changed or deleted
+//   404 not one of your categories
+//   409 the name clashes (case-insensitively) with a base or one of yours
+// lib/categories' categoryErrorMessage turns these into UI text.
+// ---------------------------------------------------------------------------
+
+export interface Category {
+  id: string;
+  /** Null for the built-in (base) categories. */
+  user_id: string | null;
+  name: string;
+  /** MaterialCommunityIcons name; null when the user picked none. */
+  icon: string | null;
+  /** "#RRGGBB"; null when the user picked none. */
+  color: string | null;
+  is_base: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CategoryInput {
+  name: string;
+  icon?: string | null;
+  color?: string | null;
+}
+
+/** PATCH body: any of name / icon / color. */
+export type CategoryUpdate = Partial<CategoryInput>;
+
+export interface GetCategoriesResponse {
+  /** Base categories first, then the user's own. */
+  categories: Category[];
+}
+
+export interface CategoryResponse {
+  category: Category;
+}
+
+export function getCategories(): Promise<GetCategoriesResponse> {
+  return authedRequest('/api/v1/categories', {}, 'Failed to load categories');
+}
+
+export function createCategory(input: CategoryInput): Promise<CategoryResponse> {
+  return authedRequest('/api/v1/categories', { method: 'POST', body: input }, 'Failed to create category');
+}
+
+export function updateCategory(id: string, updates: CategoryUpdate): Promise<CategoryResponse> {
+  return authedRequest(
+    `/api/v1/categories/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: updates },
+    'Failed to update category'
+  );
+}
+
+/** Deletes one of your categories; the server moves its items to "Other" and removes its budget. */
+export function deleteCategory(id: string): Promise<void> {
+  return authedRequestNoContent(
+    `/api/v1/categories/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    'Failed to delete category'
+  );
 }
 
 export interface LogoutTokens {
