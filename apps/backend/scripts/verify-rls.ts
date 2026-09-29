@@ -9,6 +9,11 @@
  *   and can't touch admin-only tables
  * - a user can't grant themselves admin or rewrite their profile email
  *   (migration 20260928120000), but can still edit their own name
+ * - categories (migration 20260929100000): base rows are read-only, other
+ *   users' custom rows are invisible and untouchable, custom names can't
+ *   clash with base names; a user can still manage their own custom rows
+ * - transactions (migration 20260929100200): read own only, no client writes
+ * - delete_custom_category() is not callable by clients
  */
 process.env.NODE_ENV = 'test';
 
@@ -16,6 +21,7 @@ import 'dotenv/config';
 import WebSocket from 'ws';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@smartbudget/shared/lib/supabase';
+import { BASE_CATEGORY_IDS, OTHER_CATEGORY_ID } from '../src/services/categories';
 
 const url = process.env.SUPABASE_URL!;
 const anonKey = process.env.SUPABASE_ANON_KEY!;
@@ -45,20 +51,52 @@ async function main() {
   const idB = b!.user!.id;
 
   try {
-    // Seed one receipt + budget per user with the service role.
+    // Seed one receipt + budget + custom category + transaction per user
+    // with the service role. Seeding errors abort the run (a silent seed
+    // failure would make the "sees only own rows" checks meaningless).
+    const must = <T>(label: string, result: { data: T; error: unknown }): NonNullable<T> => {
+      if (result.error || result.data === null || result.data === undefined) throw new Error(`seed ${label} failed: ${JSON.stringify(result.error)}`);
+      return result.data as NonNullable<T>;
+    };
     const raw = { merchant: 'Verify', total: 1, date: '2026-09-01', items: [] };
-    await supabase.from('receipts').insert([
-      { user_id: idA, raw_response: raw },
-      { user_id: idB, raw_response: raw },
-    ]);
-    await supabase.from('budgets').insert([
-      { user_id: idA, category: 'Other', monthly_limit: 100 },
-      { user_id: idB, category: 'Other', monthly_limit: 100 },
-    ]);
+    const receipts = must(
+      'receipts',
+      await supabase
+        .from('receipts')
+        .insert([
+          { user_id: idA, raw_response: raw },
+          { user_id: idB, raw_response: raw },
+        ])
+        .select('id, user_id')
+    );
+    const receiptA = receipts.find((r) => r.user_id === idA)!.id;
+    const receiptB = receipts.find((r) => r.user_id === idB)!.id;
+    must(
+      'budgets',
+      await supabase
+        .from('budgets')
+        .insert([
+          { user_id: idA, category: 'Other', category_id: OTHER_CATEGORY_ID, monthly_limit: 100 },
+          { user_id: idB, category: 'Other', category_id: OTHER_CATEGORY_ID, monthly_limit: 100 },
+        ])
+        .select('id')
+    );
+    const catA = must('category A', await supabase.from('categories').insert({ user_id: idA, name: `VerifyA${stamp}`.slice(0, 30) }).select('id').single()).id as string;
+    const catB = must('category B', await supabase.from('categories').insert({ user_id: idB, name: `VerifyB${stamp}`.slice(0, 30) }).select('id, name').single());
+    must(
+      'transactions',
+      await supabase
+        .from('transactions')
+        .insert([
+          { receipt_id: receiptA, user_id: idA, category_id: catA, name: 'A item', amount: 1, date: '2026-09-01', position: 0 },
+          { receipt_id: receiptB, user_id: idB, category_id: catB.id, name: 'B item', amount: 2, date: '2026-09-01', position: 0 },
+        ])
+        .select('id')
+    );
 
     // --- Signed out: nothing is readable.
     const anon = anonClient();
-    for (const table of ['profiles', 'receipts', 'budgets', 'admin_audit_log', 'rate_limit_violations', 'scan_failures']) {
+    for (const table of ['profiles', 'receipts', 'budgets', 'categories', 'transactions', 'admin_audit_log', 'rate_limit_violations', 'scan_failures']) {
       const { data } = await anon.from(table).select('*').limit(1);
       check((data ?? []).length === 0, `anon reads nothing from ${table}`, `anon can read ${table}`);
     }
@@ -110,6 +148,94 @@ async function main() {
       !nameError && afterName?.name === 'Renamed',
       'user can still update own name',
       `user can no longer update own name: ${nameError?.message ?? afterName?.name}`
+    );
+
+    // --- categories: base rows are read-only.
+    const { data: visibleCats } = await asA.from('categories').select('id, user_id, is_base');
+    const cats = visibleCats ?? [];
+    check(
+      cats.length === 7 &&
+        cats.every((c) => c.user_id === null || c.user_id === idA) &&
+        Object.values(BASE_CATEGORY_IDS).every((id) => cats.some((c) => c.id === id && c.is_base === true)) &&
+        cats.some((c) => c.id === catA && c.is_base === false),
+      'user sees the 6 base categories + only own custom ones',
+      `user sees categories: ${JSON.stringify(cats)}`
+    );
+
+    await asA.from('categories').update({ name: 'Hacked', color: '#000000' }).eq('id', OTHER_CATEGORY_ID);
+    const { data: otherAfter } = await supabase.from('categories').select('name, color').eq('id', OTHER_CATEGORY_ID).single();
+    check(otherAfter?.name === 'Other' && otherAfter?.color !== '#000000', "user can't update a base category", `base category changed: ${JSON.stringify(otherAfter)}`);
+
+    await asA.from('categories').delete().eq('id', OTHER_CATEGORY_ID);
+    const { data: otherStill } = await supabase.from('categories').select('id').eq('id', OTHER_CATEGORY_ID).maybeSingle();
+    check(!!otherStill, "user can't delete a base category", 'user deleted a base category');
+
+    const { error: baseInsert } = await asA.from('categories').insert({ user_id: null, name: `Base${stamp}`.slice(0, 30) });
+    check(!!baseInsert, "user can't create a base category", 'user created a base category');
+
+    const { error: clashInsert } = await asA.from('categories').insert({ user_id: idA, name: 'groceries' });
+    check(!!clashInsert, "user can't create a custom category named like a base one", 'user created a custom "groceries"');
+
+    // --- categories: other users' custom rows.
+    const { data: readB } = await asA.from('categories').select('id').eq('id', catB.id);
+    check((readB ?? []).length === 0, "user can't read another user's category", "user read another user's category");
+
+    await asA.from('categories').update({ name: 'Stolen' }).eq('id', catB.id);
+    const { data: bCatAfter } = await supabase.from('categories').select('name').eq('id', catB.id).single();
+    check(bCatAfter?.name === catB.name, "user can't rename another user's category", `another user's category renamed to ${bCatAfter?.name}`);
+
+    await asA.from('categories').delete().eq('id', catB.id);
+    const { data: bCatStill } = await supabase.from('categories').select('id').eq('id', catB.id).maybeSingle();
+    check(!!bCatStill, "user can't delete another user's category", "user deleted another user's category");
+
+    const { error: foreignCatInsert } = await asA.from('categories').insert({ user_id: idB, name: `Evil${stamp}`.slice(0, 30) });
+    check(!!foreignCatInsert, "user can't create a category for another user", 'user created a category for another user');
+
+    const { error: moveError } = await asA.from('categories').update({ user_id: idB }).eq('id', catA);
+    const { data: catAOwner } = await supabase.from('categories').select('user_id').eq('id', catA).single();
+    check(!!moveError && catAOwner?.user_id === idA, "user can't move own category to another user", 'user changed categories.user_id');
+
+    const { error: rpcError } = await asA.rpc('delete_custom_category', { p_user_id: idB, p_category_id: catB.id });
+    const { data: bCatAfterRpc } = await supabase.from('categories').select('id').eq('id', catB.id).maybeSingle();
+    check(!!rpcError && !!bCatAfterRpc, "user can't call delete_custom_category", 'user called delete_custom_category');
+
+    const { error: foreignBudgetCat } = await asA
+      .from('budgets')
+      .insert({ user_id: idA, category: 'x', category_id: catB.id, monthly_limit: 1 });
+    check(!!foreignBudgetCat, "user can't budget against another user's category", "user created a budget on another user's category");
+
+    // Own custom categories stay manageable (the policies aren't too strict).
+    const ownName = `Own${stamp}`.slice(0, 30);
+    const { data: own, error: ownInsert } = await asA.from('categories').insert({ user_id: idA, name: ownName }).select('id').single();
+    const { error: ownRename } = own ? await asA.from('categories').update({ name: `${ownName}x`.slice(0, 30) }).eq('id', own.id) : { error: 'no row' };
+    const { error: ownDelete } = own ? await asA.from('categories').delete().eq('id', own.id) : { error: 'no row' };
+    const { data: ownGone } = own ? await supabase.from('categories').select('id').eq('id', own.id).maybeSingle() : { data: 'x' };
+    check(
+      !ownInsert && !ownRename && !ownDelete && !ownGone,
+      'user can create, rename and delete own custom category',
+      `own category management failed: ${JSON.stringify({ ownInsert, ownRename, ownDelete, ownGone })}`
+    );
+
+    // --- transactions: read own only, no writes.
+    const { data: txRows } = await asA.from('transactions').select('user_id');
+    check(
+      (txRows ?? []).length > 0 && txRows!.every((r) => r.user_id === idA),
+      'user sees only own transactions',
+      `user sees transactions: ${JSON.stringify(txRows)}`
+    );
+
+    const { error: txInsert } = await asA
+      .from('transactions')
+      .insert({ receipt_id: receiptA, user_id: idA, category_id: OTHER_CATEGORY_ID, amount: 5, position: 1 });
+    check(!!txInsert, "user can't insert a transaction", 'user inserted a transaction');
+
+    await asA.from('transactions').update({ amount: 999 }).eq('user_id', idA);
+    await asA.from('transactions').delete().eq('user_id', idA);
+    const { data: aTx } = await supabase.from('transactions').select('amount').eq('user_id', idA);
+    check(
+      (aTx ?? []).length === 1 && Number(aTx![0].amount) === 1,
+      "user can't update or delete transactions",
+      `user changed transactions: ${JSON.stringify(aTx)}`
     );
   } finally {
     await supabase.auth.admin.deleteUser(idA);
