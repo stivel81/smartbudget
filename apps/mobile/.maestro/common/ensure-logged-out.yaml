@@ -1,0 +1,13 @@
+# Launches the app and makes sure no session is active. Ends on Login.
+appId: host.exp.Exponent
+---
+- runFlow: launch.yaml
+- runFlow:
+    when:
+      visible:
+        id: "dashboard-screen"
+    file: sign-out.yaml
+- extendedWaitUntil:
+    visible:
+      id: "login-screen"
+    timeout: 30000

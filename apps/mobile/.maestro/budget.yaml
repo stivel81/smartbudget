@@ -1,0 +1,30 @@
+# Budget tab: per-category budgets and the Total Spent / Total Budget summary.
+appId: host.exp.Exponent
+name: Budget
+tags:
+  - smoke
+---
+- runFlow: common/ensure-logged-in.yaml
+- tapOn: "Budget, tab.*"
+- extendedWaitUntil:
+    visible:
+      id: "budget-screen"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "budget-item-.*"
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "budget-total-limit"
+    direction: DOWN
+    timeout: 20000
+- assertVisible: "Total Spent"
+- assertVisible:
+    id: "budget-total-spent"
+    text: ".*\\d.*"
+- assertVisible: "Total Budget"
+- assertVisible:
+    id: "budget-total-limit"
+    text: ".*\\d.*"
+- assertVisible: "Remaining"

@@ -1,0 +1,17 @@
+# Launches the app and makes sure a session is active. Ends on the Dashboard.
+appId: host.exp.Exponent
+---
+- runFlow: launch.yaml
+- runFlow:
+    when:
+      visible:
+        id: "login-screen"
+    file: login.yaml
+- extendedWaitUntil:
+    visible:
+      id: "dashboard-screen"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "hero-count"
+    timeout: 30000

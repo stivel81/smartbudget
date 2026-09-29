@@ -74,3 +74,8 @@ coverage/
 # Misc
 .turbo/
 .cache/
+
+# Maestro e2e (apps/mobile/.maestro): local credentials and run artifacts
+apps/mobile/.maestro/.env.local
+apps/mobile/.maestro/*.mp4
+apps/mobile/.maestro/**/screenshots/

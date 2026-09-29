@@ -1,0 +1,29 @@
+# Expo Go draws a floating "Tools" gear (top right) over the app. It sits on
+# top of the receipt modal's close button, so taps meant for the app open the
+# Expo dev menu instead. Switch it off via the dev menu (Expo Go keeps the
+# setting; turn it back on under dev menu -> Tools button, or Cmd+D -> Tools
+# button). Fast refresh is left untouched.
+appId: host.exp.Exponent
+---
+- tapOn: "gearshape.fill"
+- extendedWaitUntil:
+    visible: "Reload"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Tools button"
+    direction: DOWN
+    timeout: 10000
+# The switches expose their value as text ("1" = on). Anchor on the Tools
+# button row, below the Fast refresh row, and match the switch's own size so
+# the wider row container is not picked.
+- tapOn:
+    text: "1"
+    below: "Fast refresh"
+    rightOf: "Tools button"
+    width: 63
+    height: 28
+    tolerance: 6
+- tapOn: "Close"
+- extendedWaitUntil:
+    notVisible: "gearshape.fill"
+    timeout: 10000

@@ -1,0 +1,40 @@
+# Dashboard: open the newest receipt from Recent Receipts, check the modal, close it.
+appId: host.exp.Exponent
+name: Dashboard receipt modal
+tags:
+  - smoke
+---
+- runFlow: common/ensure-logged-in.yaml
+- scrollUntilVisible:
+    element: "Recent Receipts"
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element:
+      id: "receipt-item-.*"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "receipt-item-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "receipt-modal-title"
+    timeout: 15000
+- assertVisible:
+    id: "receipt-modal-title"
+    text: ".+"
+- assertVisible:
+    id: "receipt-modal-body"
+- assertVisible:
+    id: "receipt-modal-close"
+# Never tap receipt-delete-button here: it deletes the receipt.
+- tapOn:
+    id: "receipt-modal-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "receipt-modal-title"
+    timeout: 10000
+# Back on the Dashboard list.
+- assertVisible:
+    id: "receipt-item-.*"

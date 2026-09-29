@@ -1,0 +1,22 @@
+# From signed out: log in and land on the Dashboard.
+appId: host.exp.Exponent
+name: Login
+tags:
+  - smoke
+---
+- runFlow: common/ensure-logged-out.yaml
+- assertVisible: "Welcome back"
+- runFlow: common/login.yaml
+- assertVisible: "My Finances"
+- assertVisible:
+    id: "dashboard-greeting"
+# Receipt count stat in the hero card: a number above the "Receipts" label.
+# It only exists once the first load has replaced the hero-loading placeholder.
+- extendedWaitUntil:
+    visible:
+      id: "hero-count"
+    timeout: 30000
+- assertVisible:
+    id: "hero-count"
+    text: "\\d+"
+- assertVisible: "Receipts"

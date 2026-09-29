@@ -1,0 +1,58 @@
+# Scan from the gallery: pick the newest photo, wait for Claude's result card,
+# check the merchant was extracted, then save.
+#
+# NOT part of the default run (tag `scan`): it calls the real Claude API via
+# the backend and adds a receipt to the test account.
+# Run with: npm run e2e -- --scan .maestro/scan.yaml
+# Put a receipt image in the simulator first, e.g.
+#   xcrun simctl addmedia booted receipt.jpg
+appId: host.exp.Exponent
+name: Scan receipt from gallery
+tags:
+  - scan
+---
+- runFlow: common/ensure-logged-in.yaml
+- tapOn: "Scan, tab.*"
+- extendedWaitUntil:
+    visible:
+      id: "scan-gallery-button"
+    timeout: 15000
+- tapOn:
+    id: "scan-gallery-button"
+# First run only: photo library permission.
+- runFlow:
+    when:
+      visible: "Allow Full Access|Allow Access to All Photos|Allow"
+    commands:
+      - tapOn: "Allow Full Access|Allow Access to All Photos|Allow"
+# The system photo picker takes a few seconds to appear.
+- extendedWaitUntil:
+    visible: "Collections"
+    timeout: 20000
+# Cells are labelled "Photo, <date>, <time>", newest first.
+- tapOn:
+    text: "Photo, [^,]+, [0-9]{1,2}:[0-9]{2}"
+    index: 0
+# Upload + Claude extraction.
+- extendedWaitUntil:
+    visible:
+      id: "scan-result-card"
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      id: "scan-merchant-input"
+    timeout: 10000
+- assertVisible:
+    id: "scan-merchant-input"
+    text: ".*\\S.*"
+- assertVisible:
+    id: "scan-save-button"
+- tapOn:
+    id: "scan-save-button"
+# Saving (or saving with no edits) slides the card away.
+- extendedWaitUntil:
+    notVisible:
+      id: "scan-result-card"
+    timeout: 30000
+- assertVisible:
+    id: "scan-gallery-button"

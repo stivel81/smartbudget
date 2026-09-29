@@ -1,0 +1,39 @@
+# Profile -> Settings: the screen loads and the strength meter labels a
+# weak new password. Nothing is submitted.
+appId: host.exp.Exponent
+name: Settings password strength
+tags:
+  - smoke
+---
+- runFlow: common/ensure-logged-in.yaml
+- tapOn: "Profile, tab.*"
+- extendedWaitUntil:
+    visible:
+      id: "profile-menu-settings"
+    timeout: 15000
+- tapOn:
+    id: "profile-menu-settings"
+- extendedWaitUntil:
+    visible:
+      id: "settings-screen"
+    timeout: 15000
+- assertVisible: "Change password"
+- assertVisible:
+    id: "settings-change-password-button"
+- tapOn:
+    id: "settings-new-password-input"
+- inputText: "abc"
+- extendedWaitUntil:
+    visible:
+      id: "settings-strength-label"
+      text: "Weak"
+    timeout: 5000
+- assertVisible:
+    id: "settings-strength-bar-1"
+- hideKeyboard
+- tapOn:
+    id: "settings-back-button"
+- extendedWaitUntil:
+    visible:
+      id: "profile-screen"
+    timeout: 10000

@@ -1,0 +1,31 @@
+# Fills in the Login screen with ${EMAIL} / ${PASSWORD} and lands on the Dashboard.
+# Precondition: the Login screen is showing.
+appId: host.exp.Exponent
+---
+- assertVisible:
+    id: "login-screen"
+- tapOn:
+    id: "login-email-input"
+- eraseText: 60
+- inputText: ${EMAIL}
+- tapOn:
+    id: "login-password-input"
+- eraseText: 60
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-button"
+# iOS offers to save the password after a successful login.
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dashboard-screen"
+    timeout: 30000
+# The hero stats replace the hero-loading placeholder once the first load
+# finishes.
+- extendedWaitUntil:
+    visible:
+      id: "hero-count"
+    timeout: 30000

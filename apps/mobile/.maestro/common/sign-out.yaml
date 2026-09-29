@@ -1,0 +1,24 @@
+# Profile -> Sign Out -> confirm Alert -> Login screen.
+# Precondition: signed in, on any tab screen.
+appId: host.exp.Exponent
+---
+- tapOn: "Profile, tab.*"
+- extendedWaitUntil:
+    visible:
+      id: "profile-sign-out-button"
+    timeout: 15000
+- tapOn:
+    id: "profile-sign-out-button"
+# Native confirmation: "Sign out?" with Cancel / destructive "Sign Out".
+- extendedWaitUntil:
+    visible: "Sign out\\?"
+    timeout: 10000
+# The Profile button underneath is also labelled "Sign Out" and stays in the
+# hierarchy; the Alert's button is the one to the right of Cancel.
+- tapOn:
+    text: "Sign Out"
+    rightOf: "Cancel"
+- extendedWaitUntil:
+    visible:
+      id: "login-screen"
+    timeout: 30000

@@ -1,0 +1,6 @@
+# Workspace config: `maestro test .maestro` runs every top-level flow here.
+# Subflows live in common/ and are not run on their own.
+flows:
+  - "*"
+executionOrder:
+  continueOnFailure: true

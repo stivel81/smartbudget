@@ -1,0 +1,11 @@
+# Profile -> Sign Out -> confirm "Sign out?" Alert -> Login screen.
+appId: host.exp.Exponent
+name: Sign out
+tags:
+  - smoke
+---
+- runFlow: common/ensure-logged-in.yaml
+- runFlow: common/sign-out.yaml
+- assertVisible: "Welcome back"
+- assertVisible:
+    id: "login-button"

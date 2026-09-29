@@ -1,0 +1,34 @@
+# Cold-starts Expo Go and opens the SmartBudget bundle served by Metro.
+# Ends on either the Login screen or the Dashboard.
+appId: host.exp.Exponent
+---
+- stopApp
+- launchApp:
+    appId: host.exp.Exponent
+- openLink: ${APP_URL || 'exp://127.0.0.1:8081'}
+# iOS may ask before handing the URL to Expo Go.
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+# Expo Go's one-time developer-menu onboarding sheet.
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "login-screen|dashboard-screen"
+    timeout: 90000
+# A dev menu left open by an earlier run.
+- runFlow:
+    when:
+      visible: "Toggle element inspector"
+    commands:
+      - tapOn: "Close"
+- runFlow:
+    when:
+      visible: "gearshape.fill"
+    file: hide-expo-tools-button.yaml
