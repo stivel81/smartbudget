@@ -26,6 +26,7 @@ type MenuRoute = Exclude<keyof SignedInStackParamList, 'Main'>;
 // No Notifications row: push notifications arrive in a later phase.
 export const MENU_ITEMS: { label: string; icon: IconName; route: MenuRoute; testID: string }[] = [
   { label: 'Settings', icon: 'cog-outline', route: 'Settings', testID: 'profile-menu-settings' },
+  { label: 'Categories', icon: 'tag-multiple-outline', route: 'ManageCategories', testID: 'profile-menu-categories' },
   { label: 'Privacy Policy', icon: 'file-document-outline', route: 'PrivacyPolicy', testID: 'profile-menu-privacy' },
   { label: 'Help & Support', icon: 'help-circle-outline', route: 'HelpSupport', testID: 'profile-menu-help' },
 ];

@@ -14,6 +14,7 @@ import {
 } from './lib/api';
 import { COLORS } from './lib/theme';
 import { AuthContext } from './lib/auth';
+import { CategoriesProvider } from './lib/categoriesContext';
 import { createSessionManager, SessionManager, SessionPayload } from './lib/session';
 import type { AuthStackParamList, SignedInStackParamList } from './lib/navigation';
 
@@ -27,6 +28,7 @@ import ScanScreen from './screens/ScanScreen';
 import BudgetScreen from './screens/BudgetScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import ManageCategoriesScreen from './screens/ManageCategoriesScreen';
 import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import HelpSupportScreen from './screens/HelpSupportScreen';
 
@@ -305,32 +307,38 @@ export default function App() {
           logout,
         }}
       >
-        <NavigationContainer>
-          <Stack.Navigator
-            screenOptions={{
-              headerShown: false,
-            }}
-          >
-            {!isAuthenticated ? (
-              // Auth Stack
-              <Stack.Group>
-                <Stack.Screen name="Login" component={LoginScreen as any} />
-                <Stack.Screen name="Signup" component={SignupScreen as any} />
-                <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen as any} />
-                <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen as any} />
-              </Stack.Group>
-            ) : (
-              // Main App Stack: tabs, plus screens pushed from Profile. Each
-              // draws its own V2 header with a back button (headerShown: false).
-              <Stack.Group>
-                <Stack.Screen name="Main" component={BottomTabNavigator} />
-                <Stack.Screen name="Settings" component={SettingsScreen} />
-                <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-                <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
-              </Stack.Group>
-            )}
-          </Stack.Navigator>
-        </NavigationContainer>
+        {/* Categories (base + custom) load once signed in; screens fall back
+            to the base list until then. retryKey: a launch restore whose
+            renewal was pending gets its access token -> retry a failed load. */}
+        <CategoriesProvider enabled={isAuthenticated} retryKey={accessToken !== null}>
+          <NavigationContainer>
+            <Stack.Navigator
+              screenOptions={{
+                headerShown: false,
+              }}
+            >
+              {!isAuthenticated ? (
+                // Auth Stack
+                <Stack.Group>
+                  <Stack.Screen name="Login" component={LoginScreen as any} />
+                  <Stack.Screen name="Signup" component={SignupScreen as any} />
+                  <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen as any} />
+                  <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen as any} />
+                </Stack.Group>
+              ) : (
+                // Main App Stack: tabs, plus screens pushed from Profile. Each
+                // draws its own V2 header with a back button (headerShown: false).
+                <Stack.Group>
+                  <Stack.Screen name="Main" component={BottomTabNavigator} />
+                  <Stack.Screen name="Settings" component={SettingsScreen} />
+                  <Stack.Screen name="ManageCategories" component={ManageCategoriesScreen} />
+                  <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                  <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+                </Stack.Group>
+              )}
+            </Stack.Navigator>
+          </NavigationContainer>
+        </CategoriesProvider>
       </AuthContext.Provider>
       <StatusBar style="auto" />
     </View>

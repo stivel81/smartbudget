@@ -11,10 +11,12 @@ export type AuthStackParamList = {
 };
 
 // Routes of the signed-in root stack (App.tsx). Tabs live under "Main";
-// Settings / Privacy Policy / Help & Support are pushed over the tabs.
+// Settings / Manage categories / Privacy Policy / Help & Support are pushed
+// over the tabs.
 export type SignedInStackParamList = {
   Main: undefined;
   Settings: undefined;
+  ManageCategories: undefined;
   PrivacyPolicy: undefined;
   HelpSupport: undefined;
 };

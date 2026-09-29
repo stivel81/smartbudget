@@ -143,13 +143,13 @@ describe('ProfileScreen', () => {
   it('lists exactly the Settings, Privacy Policy and Help & Support rows', () => {
     renderProfile();
     expect(screen.getByText('General')).toBeTruthy();
-    ['Settings', 'Privacy Policy', 'Help & Support'].forEach((label) => {
+    ['Settings', 'Categories', 'Privacy Policy', 'Help & Support'].forEach((label) => {
       expect(screen.getByText(label)).toBeTruthy();
     });
-    ['cog-outline', 'file-document-outline', 'help-circle-outline'].forEach((icon) => {
+    ['cog-outline', 'tag-multiple-outline', 'file-document-outline', 'help-circle-outline'].forEach((icon) => {
       expect(screen.getByTestId(`icon-${icon}`)).toBeTruthy();
     });
-    expect(MENU_ITEMS.map((i) => i.label)).toEqual(['Settings', 'Privacy Policy', 'Help & Support']);
+    expect(MENU_ITEMS.map((i) => i.label)).toEqual(['Settings', 'Categories', 'Privacy Policy', 'Help & Support']);
   });
 
   it('has no Notifications row (push notifications are a later phase)', () => {
@@ -160,6 +160,7 @@ describe('ProfileScreen', () => {
 
   it.each([
     ['profile-menu-settings', 'Settings'],
+    ['profile-menu-categories', 'ManageCategories'],
     ['profile-menu-privacy', 'PrivacyPolicy'],
     ['profile-menu-help', 'HelpSupport'],
   ])('%s navigates to %s (and does not sign out or alert)', (testID, route) => {
