@@ -9,6 +9,7 @@
 // limiters' in-memory counters are per module instance.
 process.env.TEST_ENABLE_RATE_LIMIT = '1';
 
+import http from 'http';
 import request from 'supertest';
 import type { Express } from 'express';
 
@@ -23,14 +24,24 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 
 type MockModule = typeof import('../testUtils/supabaseMock');
 
-function freshApp(): { app: Express; mock: MockModule; authLimit: number; sessionLimit: number } {
-  let app!: Express;
+// These scenarios send 100+ requests each. supertest's request(app) starts
+// a new ephemeral server per request, which under load occasionally reuses
+// a port mid-flight ("Parse Error: Expected HTTP/"); one listening server
+// per fresh app avoids that.
+const servers: http.Server[] = [];
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+});
+
+function freshApp(): { app: http.Server; mock: MockModule; authLimit: number; sessionLimit: number } {
+  let express!: Express;
   let mock!: MockModule;
   let authLimit!: number;
   let sessionLimit!: number;
   jest.isolateModules(() => {
     const index = require('../index');
-    app = index.app;
+    express = index.app;
     authLimit = index.AUTH_LIMIT;
     sessionLimit = index.SESSION_LIMIT;
     mock = require('../testUtils/supabaseMock');
@@ -49,15 +60,17 @@ function freshApp(): { app: Express; mock: MockModule; authLimit: number; sessio
   });
   mock.mockAdminSignOut.mockReset();
   mock.mockAdminSignOut.mockResolvedValue({ data: null, error: null });
+  const app = http.createServer(express).listen(0);
+  servers.push(app);
   return { app, mock, authLimit, sessionLimit };
 }
 
-const login = (app: Express) => request(app).post('/api/v1/auth/login').send({ email: 'a@b.com', password: 'wrong-password' });
-const refresh = (app: Express) => request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref' });
-const logout = (app: Express) =>
+const login = (app: http.Server) => request(app).post('/api/v1/auth/login').send({ email: 'a@b.com', password: 'wrong-password' });
+const refresh = (app: http.Server) => request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref' });
+const logout = (app: http.Server) =>
   request(app).post('/api/v1/auth/logout').set('Authorization', 'Bearer valid-token').send({ refresh_token: 'ref' });
 
-async function exhaust(app: Express, mock: MockModule, call: (a: Express) => request.Test, limit: number) {
+async function exhaust(app: http.Server, mock: MockModule, call: (a: http.Server) => request.Test, limit: number) {
   for (let i = 0; i < limit; i++) {
     const res = await call(app);
     expect(res.status).not.toBe(429);
