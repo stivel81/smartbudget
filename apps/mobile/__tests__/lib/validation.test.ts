@@ -8,6 +8,7 @@ import {
   sanitizeOtpCode,
   validateOtpCode,
   calculatePasswordStrength,
+  passwordStrengthTone,
   validatePasswordChange,
   SAME_PASSWORD_MESSAGE,
 } from '../../lib/validation';
@@ -105,6 +106,24 @@ describe('lib/validation', () => {
       ['abcdefghijkl', 2, 'Fair'],
     ])('%p -> %i bars, %p', (pw, strength, label) => {
       expect(calculatePasswordStrength(pw)).toEqual({ strength, label });
+    });
+  });
+
+  describe('passwordStrengthTone', () => {
+    it.each([
+      ['', 'none'],
+      ['Weak', 'danger'],
+      ['Fair', 'warning'],
+      ['Good', 'success'],
+      ['Strong', 'success'],
+    ] as const)('%p -> %s', (label, tone) => {
+      expect(passwordStrengthTone(label)).toBe(tone);
+    });
+
+    it('maps every computed strength to its tone', () => {
+      expect(passwordStrengthTone(calculatePasswordStrength('abc').label)).toBe('danger');
+      expect(passwordStrengthTone(calculatePasswordStrength('abcdefgh1').label)).toBe('warning');
+      expect(passwordStrengthTone(calculatePasswordStrength('Abcdefgh1').label)).toBe('success');
     });
   });
 

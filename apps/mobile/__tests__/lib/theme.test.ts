@@ -1,4 +1,4 @@
-import { COLORS, RADIUS, SPACING, FONT_FAMILY, budgetBarColor } from '../../lib/theme';
+import { COLORS, RADIUS, SPACING, FONT_FAMILY, PASSWORD_STRENGTH_COLORS, budgetBarColor } from '../../lib/theme';
 import fs from 'fs';
 import path from 'path';
 
@@ -163,6 +163,17 @@ describe('lib/theme', () => {
 
     it('FONT_FAMILY should be a string', () => {
       expect(typeof FONT_FAMILY).toBe('string');
+    });
+  });
+
+  describe('PASSWORD_STRENGTH_COLORS', () => {
+    it('maps tones to the shared status colors (red / amber / green) and empty to the border color', () => {
+      expect(PASSWORD_STRENGTH_COLORS).toEqual({
+        danger: COLORS.danger,
+        warning: COLORS.warning,
+        success: COLORS.success,
+        none: COLORS.border,
+      });
     });
   });
 });

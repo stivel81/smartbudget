@@ -85,3 +85,20 @@ export function calculatePasswordStrength(password: string): PasswordStrength {
   if (score <= 3) return { strength: 3, label: 'Good' };
   return { strength: 4, label: 'Strong' };
 }
+
+/** Semantic tone of a strength level: Weak = danger, Fair = warning, Good/Strong = success, empty = none. */
+export type PasswordStrengthTone = 'danger' | 'warning' | 'success' | 'none';
+
+export function passwordStrengthTone(label: PasswordStrength['label']): PasswordStrengthTone {
+  switch (label) {
+    case 'Weak':
+      return 'danger';
+    case 'Fair':
+      return 'warning';
+    case 'Good':
+    case 'Strong':
+      return 'success';
+    default:
+      return 'none';
+  }
+}

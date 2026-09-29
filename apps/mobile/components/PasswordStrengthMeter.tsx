@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { calculatePasswordStrength } from '../lib/validation';
-import { COLORS, FONT_FAMILY } from '../lib/theme';
+import { calculatePasswordStrength, passwordStrengthTone } from '../lib/validation';
+import { COLORS, FONT_FAMILY, PASSWORD_STRENGTH_COLORS } from '../lib/theme';
 
 interface Props {
   password: string;
@@ -15,6 +15,8 @@ interface Props {
  */
 export default function PasswordStrengthMeter({ password, testIDPrefix }: Props) {
   const { strength, label } = calculatePasswordStrength(password);
+  // Weak = red, Fair = amber, Good/Strong = green — bars and label alike.
+  const levelColor = PASSWORD_STRENGTH_COLORS[passwordStrengthTone(label)];
 
   return (
     <View style={styles.strengthContainer}>
@@ -25,12 +27,16 @@ export default function PasswordStrengthMeter({ password, testIDPrefix }: Props)
             testID={`${testIDPrefix}-strength-bar-${bar}`}
             style={[
               styles.strengthBar,
-              bar <= strength ? styles.strengthBarFilled : styles.strengthBarEmpty,
+              bar <= strength ? { backgroundColor: levelColor } : styles.strengthBarEmpty,
             ]}
           />
         ))}
       </View>
-      {label ? <Text style={styles.strengthLabel}>{label}</Text> : null}
+      {label ? (
+        <Text style={[styles.strengthLabel, { color: levelColor }]} testID={`${testIDPrefix}-strength-label`}>
+          {label}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -52,9 +58,6 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
   },
-  strengthBarFilled: {
-    backgroundColor: COLORS.success,
-  },
   strengthBarEmpty: {
     backgroundColor: COLORS.border,
   },
@@ -62,7 +65,6 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     fontSize: 10,
     fontWeight: '600',
-    color: COLORS.success,
     minWidth: 40,
   },
 });

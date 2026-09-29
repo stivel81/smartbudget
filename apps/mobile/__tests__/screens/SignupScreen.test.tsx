@@ -145,7 +145,18 @@ describe('SignupScreen', () => {
     const colors = [1, 2, 3, 4].map(
       (bar) => StyleSheet.flatten(screen.getByTestId(`signup-strength-bar-${bar}`).props.style).backgroundColor
     );
-    expect(colors).toEqual([COLORS.success, COLORS.success, COLORS.border, COLORS.border]);
+    // Fair = amber (was green for every level).
+    expect(colors).toEqual([COLORS.warning, COLORS.warning, COLORS.border, COLORS.border]);
+    expect(StyleSheet.flatten(screen.getByText('Fair').props.style).color).toBe(COLORS.warning);
+  });
+
+  it('shows a weak password in red', () => {
+    renderSignup();
+    fireEvent.changeText(screen.getByTestId('signup-password-input'), 'abc');
+    expect(StyleSheet.flatten(screen.getByText('Weak').props.style).color).toBe(COLORS.danger);
+    expect(StyleSheet.flatten(screen.getByTestId('signup-strength-bar-1').props.style).backgroundColor).toBe(
+      COLORS.danger
+    );
   });
 
   it('trims the email before signing up', async () => {

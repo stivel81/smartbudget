@@ -97,3 +97,14 @@ export function budgetBarColor(percentage: number): string {
   }
   return COLORS.success;
 }
+
+// Password strength meter: Weak = red, Fair = amber, Good/Strong = green.
+// Keyed by lib/validation's PasswordStrengthTone (kept as a string union
+// here so theme stays free of validation imports). 'none' (empty password)
+// uses the empty-bar color.
+export const PASSWORD_STRENGTH_COLORS: Record<'danger' | 'warning' | 'success' | 'none', string> = {
+  danger: COLORS.danger,
+  warning: COLORS.warning,
+  success: COLORS.success,
+  none: COLORS.border,
+};
