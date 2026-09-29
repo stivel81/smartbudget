@@ -1,6 +1,6 @@
 import React from 'react';
-import { Animated } from 'react-native';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
+import { Animated, AppState } from 'react-native';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import App from '../App';
 
@@ -535,5 +535,219 @@ describe('App first-run Dashboard shortcuts (real navigator)', () => {
     const navErrors = errorSpy.mock.calls.filter((args) => /not handled by any navigator/.test(String(args[0])));
     expect(navErrors).toEqual([]);
     errorSpy.mockRestore();
+  });
+});
+
+// Session renewal through the real navigator + real lib/api + lib/session:
+// the access token expires while the app runs (the live "Invalid or
+// expired token" bug), and screens never deal with it themselves.
+describe('App session renewal (real navigator)', () => {
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+
+  const sessionBody = (n: number, extra: Record<string, unknown> = {}) => ({
+    session: {
+      access_token: `acc-${n}`,
+      refresh_token: `ref-${n}`,
+      expires_in: 3600,
+      user: { id: 'u1', email: 'a@b.com', name: 'Ada Lovelace' },
+      ...extra,
+    },
+  });
+
+  type Reply = { ok: boolean; status: number; json: () => Promise<any> };
+
+  /**
+   * Backend fake: /refresh answers from `refreshReplies` in order; data
+   * routes answer 200 only for `validToken()` and 401 otherwise.
+   */
+  function fakeBackend(refreshReplies: Reply[], validToken: () => string) {
+    const refreshQueue = [...refreshReplies];
+    global.fetch = jest.fn((url: string, init: any = {}) => {
+      if (url.includes('/api/v1/auth/refresh')) {
+        const reply = refreshQueue.shift();
+        return reply ? Promise.resolve(reply) : Promise.reject(new Error('unexpected refresh'));
+      }
+      if (url.includes('/api/v1/auth/logout')) return Promise.resolve(okJson({ message: 'Signed out successfully' }));
+      const authorized = init.headers?.Authorization === `Bearer ${validToken()}`;
+      if (!authorized) return Promise.resolve(errJson(401, { error: 'Invalid or expired token', status: 401 }));
+      if (url.includes('/api/v1/receipts')) return Promise.resolve(okJson({ receipts: [] }));
+      if (url.includes('/api/v1/budgets')) return Promise.resolve(okJson({ budgets: [] }));
+      return Promise.reject(new Error(`Unhandled fetch in test: ${url}`));
+    }) as jest.Mock;
+  }
+
+  const calls = (fragment: string) =>
+    (global.fetch as jest.Mock).mock.calls.filter(([url]) => String(url).includes(fragment));
+
+  it('a Dashboard load after the access token expired transparently succeeds, and the rotated refresh token is persisted', async () => {
+    let valid = 'acc-1';
+    // Launch restore -> acc-1; then the server-side token "expires" (acc-2 is the only valid one).
+    fakeBackend([okJson(sessionBody(1)), okJson(sessionBody(2))], () => valid);
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('ref-1'));
+
+    // Visit Budget while the token is still good...
+    fireEvent.press(screen.getByText('Budget'));
+    await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+    const receiptCallsBefore = calls('/api/v1/receipts').length;
+
+    // ...then the access token expires server-side, and the Dashboard reloads on focus.
+    valid = 'acc-2';
+    fireEvent.press(screen.getByText('Home'));
+    await waitFor(() =>
+      expect(calls('/api/v1/receipts').some(([, init]) => init.headers.Authorization === 'Bearer acc-2')).toBe(true)
+    );
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(screen.queryByText('Invalid or expired token')).toBeNull();
+
+    // The Dashboard's two parallel loads both got a 401, shared ONE refresh
+    // (with the rotated token from launch), and were each retried once.
+    const refreshCalls = calls('/auth/refresh');
+    expect(refreshCalls.map(([, init]) => JSON.parse(init.body))).toEqual([
+      { refresh_token: 'stored-ref' },
+      { refresh_token: 'ref-1' },
+    ]);
+    const dashboardLoad = [...calls('/api/v1/receipts').slice(receiptCallsBefore), ...calls('/api/v1/budgets').slice(-2)];
+    expect(dashboardLoad.map(([, init]) => init.headers.Authorization).sort()).toEqual([
+      'Bearer acc-1',
+      'Bearer acc-1',
+      'Bearer acc-2',
+      'Bearer acc-2',
+    ]);
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('ref-2'));
+
+    // Later calls use the renewed token straight away (no further refresh).
+    fireEvent.press(screen.getByText('Budget'));
+    await waitFor(() =>
+      expect(calls('/api/v1/budgets').at(-1)![1].headers.Authorization).toBe('Bearer acc-2')
+    );
+    await waitFor(() => expect(screen.getByText('No budgets set')).toBeTruthy());
+    expect(calls('/auth/refresh')).toHaveLength(2);
+  });
+
+  it('with a dead refresh token the user lands on Login with the session-expired message, and storage is cleared', async () => {
+    let valid = 'acc-1';
+    fakeBackend(
+      [okJson(sessionBody(1)), errJson(401, { error: 'Invalid or expired refresh token', status: 401 })],
+      () => valid
+    );
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+    await AsyncStorage.setItem('@smartbudget/userName', 'Ada Lovelace');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+
+    valid = 'nobody';
+    fireEvent.press(screen.getByText('Budget'));
+
+    await waitFor(() => expect(screen.getByTestId('login-session-notice')).toBeTruthy());
+    expect(screen.getByTestId('login-session-notice')).toHaveTextContent('Your session expired, please sign in again');
+    expect(screen.getByTestId('login-email-input')).toBeTruthy();
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull());
+    // One refresh attempt, no loop.
+    expect(calls('/auth/refresh')).toHaveLength(2);
+  });
+
+  it('signing in again after an expiry clears the message', async () => {
+    let valid = 'acc-1';
+    fakeBackend([okJson(sessionBody(1)), errJson(401, { error: 'dead', status: 401 })], () => valid);
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    valid = 'nobody';
+    fireEvent.press(screen.getByText('Budget'));
+    await waitFor(() => expect(screen.getByTestId('login-session-notice')).toBeTruthy());
+
+    const fetchMock = global.fetch as jest.Mock;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init: any) =>
+      String(url).includes('/auth/login') ? Promise.resolve(okJson(sessionBody(7))) : fallback(url, init)
+    );
+    valid = 'acc-7';
+    fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+    fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+    fireEvent.press(screen.getByTestId('login-button'));
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    expect(screen.queryByTestId('login-session-notice')).toBeNull();
+  });
+
+  it('returning to the foreground with an expired token renews it before anything else (AppState active)', async () => {
+    let appStateHandler: ((state: string) => void) | undefined;
+    const remove = jest.fn();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, handler: (s: string) => void) => {
+      appStateHandler = handler;
+      return { remove };
+    }) as any);
+    fakeBackend([okJson(sessionBody(1)), okJson(sessionBody(2))], () => 'acc-1');
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    expect(appStateHandler).toBeDefined();
+
+    // The app was suspended in the background for 2h (JS timers didn't run).
+    const realNow = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(realNow + 2 * 3_600_000);
+    await act(async () => {
+      appStateHandler!('active');
+    });
+
+    await waitFor(() => expect(calls('/auth/refresh')).toHaveLength(2));
+    expect(JSON.parse(calls('/auth/refresh')[1][1].body)).toEqual({ refresh_token: 'ref-1' });
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('ref-2'));
+
+    unmount();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('sign-out sends the refresh token too, so the backend can revoke an expired session', async () => {
+    fakeBackend([okJson(sessionBody(1))], () => 'acc-1');
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    const [[, init]] = calls('/auth/logout');
+    expect(init.headers.Authorization).toBe('Bearer acc-1');
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: 'ref-1' });
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());
+    // Signed out: no session-expired message for a deliberate sign-out.
+    expect(screen.queryByTestId('login-session-notice')).toBeNull();
+  });
+
+  it('sign-out with a failing backend still signs out locally', async () => {
+    fakeBackend([okJson(sessionBody(1))], () => 'acc-1');
+    const fetchMock = global.fetch as jest.Mock;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init: any) =>
+      String(url).includes('/auth/logout') ? Promise.reject(new TypeError('Network request failed')) : fallback(url, init)
+    );
+    await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+    fireEvent.press(screen.getByText('Profile'));
+    await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+
+    await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
+    await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());
   });
 });

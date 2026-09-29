@@ -110,10 +110,9 @@ const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ rece
 
 const ReceiptImageModal: React.FC<{
   receipt: Receipt;
-  accessToken: string;
   onClose: () => void;
   onReceiptUpdated: (receipt: Receipt) => void;
-}> = ({ receipt, accessToken, onClose, onReceiptUpdated }) => {
+}> = ({ receipt, onClose, onReceiptUpdated }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -137,7 +136,7 @@ const ReceiptImageModal: React.FC<{
     setSavingIndex(index);
     setSaveError('');
     try {
-      const { receipt: updated } = await updateItemCategories(receipt.id, [{ index, category }], accessToken);
+      const { receipt: updated } = await updateItemCategories(receipt.id, [{ index, category }]);
       if (mounted.current) onReceiptUpdated(updated);
     } catch (err: unknown) {
       if (mounted.current) setSaveError(errorMessage(err, 'Could not change the category. Please try again.'));
@@ -152,7 +151,7 @@ const ReceiptImageModal: React.FC<{
     setError('');
     setImageUrl(null);
 
-    getReceiptImageUrl(receipt.id, accessToken)
+    getReceiptImageUrl(receipt.id)
       .then((url) => {
         if (!cancelled) setImageUrl(url);
       })
@@ -166,7 +165,7 @@ const ReceiptImageModal: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [receipt.id, accessToken]);
+  }, [receipt.id]);
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
@@ -235,6 +234,9 @@ const ReceiptImageModal: React.FC<{
 
 export default function DashboardScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
+  // Signed in or not — not the token itself: lib/api gets (and renews) the
+  // token on its own, and a renewal must not re-trigger the loads below.
+  const hasSession = auth.accessToken !== null;
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
@@ -253,13 +255,13 @@ export default function DashboardScreen(): React.ReactElement {
       let cancelled = false;
 
       async function load() {
-        if (!auth.accessToken) return;
+        if (!hasSession) return;
         setLoading(true);
         setError('');
         try {
           const [receiptsRes, budgetsRes] = await Promise.all([
-            getReceipts(auth.accessToken),
-            getBudgets(auth.accessToken),
+            getReceipts(),
+            getBudgets(),
           ]);
           if (!cancelled) {
             setReceipts(receiptsRes.receipts);
@@ -276,7 +278,7 @@ export default function DashboardScreen(): React.ReactElement {
       return () => {
         cancelled = true;
       };
-    }, [auth.accessToken])
+    }, [hasSession])
   );
 
   const now = new Date();
@@ -416,10 +418,9 @@ export default function DashboardScreen(): React.ReactElement {
         )}
       </ScrollView>
 
-      {selectedReceipt && auth.accessToken && (
+      {selectedReceipt && hasSession && (
         <ReceiptImageModal
           receipt={selectedReceipt}
-          accessToken={auth.accessToken}
           onClose={() => setSelectedReceiptId(null)}
           onReceiptUpdated={replaceReceipt}
         />

@@ -96,6 +96,13 @@ export default function LoginScreen({ navigation }: Props) {
             <Text style={styles.subtitle}>Sign in to SmartBudget</Text>
           </View>
 
+          {/* Why the user is here: the session could not be renewed (App.tsx). */}
+          {auth.sessionNotice && !error ? (
+            <View style={styles.noticeBanner} testID="login-session-notice" accessibilityLiveRegion="polite">
+              <Text style={styles.noticeText}>{auth.sessionNotice}</Text>
+            </View>
+          ) : null}
+
           {/* Error Banner */}
           {error ? (
             <View style={styles.errorBanner}>
@@ -227,6 +234,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     fontWeight: '400',
+  },
+  noticeBanner: {
+    backgroundColor: COLORS.alertBg,
+    borderColor: COLORS.alertBorder,
+    borderWidth: 1,
+    borderRadius: RADIUS.input,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 24,
+  },
+  noticeText: {
+    fontFamily: FONT_FAMILY,
+    color: COLORS.alertTextColor,
+    fontSize: 13,
   },
   errorBanner: {
     backgroundColor: COLORS.errorBg,

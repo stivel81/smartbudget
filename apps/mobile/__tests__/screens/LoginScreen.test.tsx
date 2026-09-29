@@ -24,6 +24,10 @@ function renderLogin(overrides: Partial<AuthContextType> = {}) {
     setUserEmail: jest.fn(),
     userName: null,
     setUserName: jest.fn(),
+    expiresAt: null,
+    setExpiresAt: jest.fn(),
+    sessionNotice: null,
+    setSessionNotice: jest.fn(),
     logout: jest.fn(async () => {}),
     ...overrides,
   };
@@ -257,5 +261,44 @@ describe('LoginScreen', () => {
 
     await waitFor(() => expect(screen.getByText('Password is required')).toBeTruthy());
     expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  describe('session-expired notice', () => {
+    const NOTICE = 'Your session expired, please sign in again';
+
+    it('shows the notice from the auth context, in the alert (not error) style', () => {
+      renderLogin({ sessionNotice: NOTICE });
+
+      const banner = screen.getByTestId('login-session-notice');
+      expect(banner).toHaveTextContent(NOTICE);
+      const style = StyleSheet.flatten(banner.props.style);
+      expect(style.backgroundColor).toBe(COLORS.alertBg);
+      expect(style.borderColor).toBe(COLORS.alertBorder);
+    });
+
+    it('shows nothing without a notice', () => {
+      renderLogin();
+      expect(screen.queryByTestId('login-session-notice')).toBeNull();
+    });
+
+    it('gives way to a login error, and signing in clears it', async () => {
+      mockLogin.mockRejectedValueOnce({ message: 'Invalid email or password', code: 401 });
+      mockLogin.mockResolvedValueOnce({
+        session: { access_token: 'a', refresh_token: 'r', user: { id: 'u1', email: 'a@b.com' } },
+      });
+      const { auth } = renderLogin({ sessionNotice: NOTICE });
+
+      fireEvent.changeText(screen.getByTestId('login-email-input'), 'a@b.com');
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'wrong');
+      fireEvent.press(screen.getByTestId('login-button'));
+      await waitFor(() => expect(screen.getByText('Invalid email or password')).toBeTruthy());
+      expect(screen.queryByTestId('login-session-notice')).toBeNull();
+      await waitFor(() => expect(screen.getByTestId('login-button')).not.toBeDisabled());
+
+      fireEvent.changeText(screen.getByTestId('login-password-input'), 'password123');
+      fireEvent.press(screen.getByTestId('login-button'));
+      await waitFor(() => expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true));
+      expect(auth.setSessionNotice).toHaveBeenCalledWith(null);
+    });
   });
 });

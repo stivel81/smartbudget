@@ -89,6 +89,10 @@ function authValue(overrides: Partial<AuthContextType> = {}): AuthContextType {
     setUserEmail: () => {},
     userName: null,
     setUserName: () => {},
+    expiresAt: null,
+    setExpiresAt: () => {},
+    sessionNotice: null,
+    setSessionNotice: () => {},
     logout: async () => {},
     ...overrides,
   };
@@ -364,7 +368,7 @@ describe('ScanScreen — scanning', () => {
     expect(mockImage.saveAsync).toHaveBeenCalledWith({ format: 'jpeg', compress: 0.9, base64: true });
     expect(mockContext.release).toHaveBeenCalled();
     expect(mockImage.release).toHaveBeenCalled();
-    expect(mockScanReceipt).toHaveBeenCalledWith('base64data', 'image/jpeg', 'test-token');
+    expect(mockScanReceipt).toHaveBeenCalledWith('base64data', 'image/jpeg');
 
     expect(screen.getByText('AI Extracted')).toBeTruthy();
     expect(screen.getByTestId('icon-creation')).toBeTruthy(); // sparkles
@@ -379,7 +383,7 @@ describe('ScanScreen — scanning', () => {
   it('scans a gallery image the same way', async () => {
     renderScan();
     await scanFromGallery();
-    expect(mockScanReceipt).toHaveBeenCalledWith('base64data', 'image/jpeg', 'test-token');
+    expect(mockScanReceipt).toHaveBeenCalledWith('base64data', 'image/jpeg');
   });
 
   it('shows the scanning state while the upload is in flight', async () => {
@@ -556,7 +560,7 @@ describe('ScanScreen — result card actions', () => {
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
     await waitFor(() =>
-      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { merchant: 'Rami Levy' }, 'test-token')
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { merchant: 'Rami Levy' })
     );
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
   });
@@ -568,7 +572,7 @@ describe('ScanScreen — result card actions', () => {
     fireEvent.changeText(screen.getByTestId('scan-total-input'), '42.5');
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
-    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { total: 42.5 }, 'test-token'));
+    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { total: 42.5 }));
   });
 
   it('Save sends both fields when both changed', async () => {
@@ -580,7 +584,7 @@ describe('ScanScreen — result card actions', () => {
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
     await waitFor(() =>
-      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { merchant: 'Aroma', total: 18 }, 'test-token')
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { merchant: 'Aroma', total: 18 })
     );
   });
 
@@ -688,7 +692,7 @@ describe('ScanScreen — top-bar Cancel (discard)', () => {
 
     fireEvent.press(cancel);
 
-    await waitFor(() => expect(mockDeleteReceipt).toHaveBeenCalledWith('r1', 'test-token'));
+    await waitFor(() => expect(mockDeleteReceipt).toHaveBeenCalledWith('r1'));
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
     expect(mockUpdateReceipt).not.toHaveBeenCalled();
   });
@@ -777,7 +781,7 @@ describe('ScanScreen — total formatting (formatCurrency)', () => {
     fireEvent.changeText(screen.getByTestId('scan-total-input'), '₪1,300.00');
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
-    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { total: 1300 }, 'test-token'));
+    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { total: 1300 }));
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
   });
 
@@ -879,7 +883,7 @@ describe('ScanScreen — line items and category picker', () => {
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
     await waitFor(() =>
-      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] }, 'test-token')
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] })
     );
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
   });
@@ -918,8 +922,7 @@ describe('ScanScreen — line items and category picker', () => {
             { index: 0, category: 'Dining' },
             { index: 2, category: 'Transport' },
           ],
-        },
-        'test-token'
+        }
       )
     );
   });
@@ -969,7 +972,7 @@ describe('ScanScreen — line items and category picker', () => {
 
     fireEvent.press(screen.getByTestId('scan-save-button'));
     await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledTimes(2));
-    expect(mockUpdateReceipt).toHaveBeenLastCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] }, 'test-token');
+    expect(mockUpdateReceipt).toHaveBeenLastCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] });
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
   });
 

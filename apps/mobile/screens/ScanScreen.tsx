@@ -157,7 +157,7 @@ export default function ScanScreen(): React.ReactElement {
     setLoading(true);
     try {
       const base64 = await resizeForUpload(asset);
-      const { receipt } = await scanReceipt(base64, 'image/jpeg', auth.accessToken);
+      const { receipt } = await scanReceipt(base64, 'image/jpeg');
       showResultCard(toScanResult(receipt));
     } catch (err: unknown) {
       Alert.alert('Scan failed', errorMessage(err, 'Could not analyze this receipt.'));
@@ -219,7 +219,7 @@ export default function ScanScreen(): React.ReactElement {
 
     setDiscarding(true);
     try {
-      await deleteReceipt(result.id, auth.accessToken);
+      await deleteReceipt(result.id);
       handleDismiss();
     } catch (err: unknown) {
       Alert.alert('Failed to discard', errorMessage(err, 'Please try again.'));
@@ -247,7 +247,7 @@ export default function ScanScreen(): React.ReactElement {
 
     setConfirming(true);
     try {
-      await updateReceipt(result.id, outcome.updates, auth.accessToken);
+      await updateReceipt(result.id, outcome.updates);
       handleDismiss();
     } catch (err: unknown) {
       Alert.alert('Failed to save changes', errorMessage(err, 'Please try again.'));

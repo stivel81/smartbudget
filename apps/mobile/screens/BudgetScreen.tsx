@@ -106,6 +106,9 @@ const BudgetItem: React.FC<{ item: BudgetWithSpend; onPress: () => void }> = ({ 
 
 export default function BudgetScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
+  // Signed in or not — not the token itself: lib/api gets (and renews) the
+  // token on its own, and a renewal must not re-trigger the loads below.
+  const hasSession = auth.accessToken !== null;
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,13 +124,13 @@ export default function BudgetScreen(): React.ReactElement {
       let cancelled = false;
 
       async function load() {
-        if (!auth.accessToken) return;
+        if (!hasSession) return;
         setLoading(true);
         setError('');
         try {
           const [budgetsRes, receiptsRes] = await Promise.all([
-            getBudgets(auth.accessToken),
-            getReceipts(auth.accessToken),
+            getBudgets(),
+            getReceipts(),
           ]);
           if (!cancelled) {
             setBudgets(budgetsRes.budgets);
@@ -144,7 +147,7 @@ export default function BudgetScreen(): React.ReactElement {
       return () => {
         cancelled = true;
       };
-    }, [auth.accessToken])
+    }, [hasSession])
   );
 
   const now = new Date();
@@ -187,12 +190,12 @@ export default function BudgetScreen(): React.ReactElement {
       Alert.alert('Invalid limit', 'Enter a limit greater than 0.');
       return;
     }
-    if (!auth.accessToken) return;
+    if (!hasSession) return;
 
     setSaving(true);
     try {
-      await upsertBudget(modalCategory, limitNumber, auth.accessToken);
-      const { budgets: updated } = await getBudgets(auth.accessToken);
+      await upsertBudget(modalCategory, limitNumber);
+      const { budgets: updated } = await getBudgets();
       setBudgets(updated);
       setModalVisible(false);
     } catch (err: any) {

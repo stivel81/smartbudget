@@ -76,6 +76,10 @@ function renderBudget(accessToken: string | null = 'test-token') {
         setUserEmail: () => {},
         userName: null,
         setUserName: () => {},
+        expiresAt: null,
+        setExpiresAt: () => {},
+        sessionNotice: null,
+        setSessionNotice: () => {},
         logout: async () => {},
       }}
     >
@@ -354,7 +358,7 @@ describe('BudgetScreen', () => {
       // Saving without changes upserts the pre-filled category/limit
       mockUpsertBudget.mockResolvedValue({ budget: budget('b1', 'Dining', 400) });
       fireEvent.press(screen.getByTestId('budget-save-button'));
-      await waitFor(() => expect(mockUpsertBudget).toHaveBeenCalledWith('Dining', 400, 'test-token'));
+      await waitFor(() => expect(mockUpsertBudget).toHaveBeenCalledWith('Dining', 400));
     });
 
     it('resets the form when opening add after edit', async () => {
@@ -398,10 +402,10 @@ describe('BudgetScreen', () => {
 
       await waitFor(() => expect(screen.queryByText('Set Budget')).toBeNull());
       expect(mockUpsertBudget).toHaveBeenCalledTimes(1);
-      expect(mockUpsertBudget).toHaveBeenCalledWith('Transport', 250, 'test-token');
+      expect(mockUpsertBudget).toHaveBeenCalledWith('Transport', 250);
       // Initial load + refresh after save
       expect(mockGetBudgets).toHaveBeenCalledTimes(2);
-      expect(mockGetBudgets).toHaveBeenLastCalledWith('test-token');
+      expect(mockGetBudgets).toHaveBeenLastCalledWith();
       // Upsert happens before the refresh
       expect(mockUpsertBudget.mock.invocationCallOrder[0]).toBeLessThan(
         mockGetBudgets.mock.invocationCallOrder[1]

@@ -19,7 +19,19 @@ import {
   deleteBudget,
   logout,
   API_BASE_URL,
+  setAccessTokenProvider,
+  SESSION_EXPIRED_MESSAGE,
 } from '../../lib/api';
+import { createSessionManager } from '../../lib/session';
+
+/** Poll (microtask/macrotask turns) until `cond` holds; fails after ~1s. */
+async function waitForCondition(cond: () => boolean) {
+  for (let i = 0; i < 200; i++) {
+    if (cond()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error('condition not met');
+}
 
 function mockFetchOnce(status: number, body: unknown) {
   global.fetch = jest.fn().mockResolvedValue({
@@ -29,8 +41,44 @@ function mockFetchOnce(status: number, body: unknown) {
   }) as jest.Mock;
 }
 
+/** A provider that hands out `token` and can't renew (unless a test says otherwise). */
+function fakeProvider(token: string | null = 'tok') {
+  return {
+    getAccessToken: jest.fn(async () => token),
+    refreshAfterUnauthorized: jest.fn(async (_rejected: string): Promise<string | null> => null),
+  };
+}
+
+type FakeResponse = { status: number; body?: unknown; nonJson?: boolean };
+
+/** fetch resolving `responses` in order (the last one repeats). */
+function mockFetchSequence(...responses: FakeResponse[]) {
+  let i = 0;
+  global.fetch = jest.fn(async () => {
+    const r = responses[Math.min(i++, responses.length - 1)];
+    return {
+      ok: r.status >= 200 && r.status < 300,
+      status: r.status,
+      json: async () => {
+        if (r.nonJson) throw new SyntaxError('Unexpected token < in JSON');
+        return r.body;
+      },
+    };
+  }) as jest.Mock;
+}
+
+const fetchCall = (n: number) => (global.fetch as jest.Mock).mock.calls[n] as [string, any];
+
 describe('lib/api', () => {
+  let provider: ReturnType<typeof fakeProvider>;
+
+  beforeEach(() => {
+    provider = fakeProvider('tok');
+    setAccessTokenProvider(provider);
+  });
+
   afterEach(() => {
+    setAccessTokenProvider(null);
     jest.resetAllMocks();
   });
 
@@ -221,11 +269,11 @@ describe('lib/api', () => {
       };
       mockFetchOnce(201, { receipt });
 
-      const result = await scanReceipt('base64data', 'image/jpeg', 'tok123');
+      const result = await scanReceipt('base64data', 'image/jpeg');
 
       expect(result.receipt).toEqual(receipt);
       const [, options] = (global.fetch as jest.Mock).mock.calls[0];
-      expect(options.headers.Authorization).toBe('Bearer tok123');
+      expect(options.headers.Authorization).toBe('Bearer tok');
       expect(JSON.parse(options.body)).toEqual({ image: 'base64data', mediaType: 'image/jpeg' });
     });
   });
@@ -234,7 +282,7 @@ describe('lib/api', () => {
     it('returns the receipts list', async () => {
       mockFetchOnce(200, { receipts: [] });
 
-      const result = await getReceipts('tok123');
+      const result = await getReceipts();
 
       expect(result.receipts).toEqual([]);
     });
@@ -318,7 +366,7 @@ describe('lib/api', () => {
     it('POSTs both passwords with the bearer token to /auth/change-password', async () => {
       mockFetchOnce(200, { message: 'Password updated' });
 
-      const result = await changePassword('oldpassword1', 'newpassword2', 'access-tok');
+      const result = await changePassword('oldpassword1', 'newpassword2');
 
       expect(result).toEqual({ message: 'Password updated' });
       expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -326,29 +374,41 @@ describe('lib/api', () => {
       expect(url).toBe(`${API_BASE_URL}/api/v1/auth/change-password`);
       expect(options.method).toBe('POST');
       expect(options.headers['Content-Type']).toBe('application/json');
-      expect(options.headers.Authorization).toBe('Bearer access-tok');
+      expect(options.headers.Authorization).toBe('Bearer tok');
       expect(JSON.parse(options.body)).toEqual({ currentPassword: 'oldpassword1', newPassword: 'newpassword2' });
     });
 
-    it('throws the backend message and status for a wrong current password', async () => {
+    it('throws the backend message and status for a wrong current password — not an auth failure (no renewal)', async () => {
       mockFetchOnce(400, { error: 'Current password is incorrect', status: 400 });
 
-      await expect(changePassword('wrong', 'newpassword2', 'tok')).rejects.toEqual({
+      await expect(changePassword('wrong', 'newpassword2')).rejects.toEqual({
         message: 'Current password is incorrect',
         code: 400,
       });
+      expect(provider.refreshAfterUnauthorized).not.toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('throws with the status on 401 (expired session)', async () => {
+    it('throws with the status on 401 when the session cannot be renewed', async () => {
       mockFetchOnce(401, { error: 'Invalid or expired token', status: 401 });
 
-      await expect(changePassword('a', 'newpassword2', 'expired')).rejects.toMatchObject({ code: 401 });
+      await expect(changePassword('a', 'newpassword2')).rejects.toEqual({ message: 'Invalid or expired token', code: 401 });
+      expect(provider.refreshAfterUnauthorized).toHaveBeenCalledWith('tok');
+    });
+
+    it('renews an expired session and retries (the live "Invalid or expired token" bug)', async () => {
+      mockFetchSequence({ status: 401, body: { error: 'Invalid or expired token' } }, { status: 200, body: { message: 'Password updated' } });
+      provider.refreshAfterUnauthorized.mockResolvedValueOnce('renewed');
+
+      await expect(changePassword('oldpassword1', 'newpassword2')).resolves.toEqual({ message: 'Password updated' });
+      expect(fetchCall(1)[1].headers.Authorization).toBe('Bearer renewed');
+      expect(JSON.parse(fetchCall(1)[1].body)).toEqual({ currentPassword: 'oldpassword1', newPassword: 'newpassword2' });
     });
 
     it('falls back to a generic message when the error body has none', async () => {
       mockFetchOnce(500, {});
 
-      await expect(changePassword('a', 'newpassword2', 'tok')).rejects.toEqual({
+      await expect(changePassword('a', 'newpassword2')).rejects.toEqual({
         message: 'Could not change password',
         code: 500,
       });
@@ -358,12 +418,13 @@ describe('lib/api', () => {
       const networkError = new TypeError('Network request failed');
       global.fetch = jest.fn().mockRejectedValue(networkError) as jest.Mock;
 
-      await expect(changePassword('a', 'newpassword2', 'tok')).rejects.toBe(networkError);
+      await expect(changePassword('a', 'newpassword2')).rejects.toBe(networkError);
     });
   });
 
-  // Every authenticated call: right URL/method/bearer/body on success, and the
-  // backend message (or a default) + HTTP status on failure.
+  // Every authenticated call: right URL/method/bearer/body on success, the
+  // backend message (or a default) + HTTP status on failure, and the shared
+  // renew-and-retry-once behavior on a 401.
   describe('authenticated calls', () => {
     const cases: {
       name: string;
@@ -377,7 +438,7 @@ describe('lib/api', () => {
     }[] = [
       {
         name: 'scanReceipt',
-        call: () => scanReceipt('b64', 'image/png', 'tok'),
+        call: () => scanReceipt('b64', 'image/png'),
         url: '/api/v1/receipts/scan',
         method: 'POST',
         body: { image: 'b64', mediaType: 'image/png' },
@@ -387,7 +448,7 @@ describe('lib/api', () => {
       },
       {
         name: 'getReceipts',
-        call: () => getReceipts('tok'),
+        call: () => getReceipts(),
         url: '/api/v1/receipts',
         method: 'GET',
         okBody: { receipts: [{ id: 'r1' }] },
@@ -396,7 +457,7 @@ describe('lib/api', () => {
       },
       {
         name: 'updateReceipt',
-        call: () => updateReceipt('r1', { merchant: 'Shop', total: 12.5 }, 'tok'),
+        call: () => updateReceipt('r1', { merchant: 'Shop', total: 12.5 }),
         url: '/api/v1/receipts/r1',
         method: 'PATCH',
         body: { merchant: 'Shop', total: 12.5 },
@@ -406,7 +467,7 @@ describe('lib/api', () => {
       },
       {
         name: 'updateReceipt (items + date)',
-        call: () => updateReceipt('r1', { date: '17/08/2026', items: [{ index: 0, category: 'Dining' }] }, 'tok'),
+        call: () => updateReceipt('r1', { date: '17/08/2026', items: [{ index: 0, category: 'Dining' }] }),
         url: '/api/v1/receipts/r1',
         method: 'PATCH',
         body: { date: '17/08/2026', items: [{ index: 0, category: 'Dining' }] },
@@ -422,8 +483,7 @@ describe('lib/api', () => {
             [
               { index: 0, category: 'Dining' },
               { index: 2, category: 'Health' },
-            ],
-            'tok'
+            ]
           ),
         url: '/api/v1/receipts/r2',
         method: 'PATCH',
@@ -439,7 +499,7 @@ describe('lib/api', () => {
       },
       {
         name: 'getReceiptImageUrl',
-        call: () => getReceiptImageUrl('r1', 'tok'),
+        call: () => getReceiptImageUrl('r1'),
         url: '/api/v1/receipts/r1/image-url',
         method: 'GET',
         okBody: { url: 'https://signed.example/img.jpg' },
@@ -448,7 +508,7 @@ describe('lib/api', () => {
       },
       {
         name: 'deleteReceipt',
-        call: () => deleteReceipt('r1', 'tok'),
+        call: () => deleteReceipt('r1'),
         url: '/api/v1/receipts/r1',
         method: 'DELETE',
         okBody: {},
@@ -457,7 +517,7 @@ describe('lib/api', () => {
       },
       {
         name: 'getBudgets',
-        call: () => getBudgets('tok'),
+        call: () => getBudgets(),
         url: '/api/v1/budgets',
         method: 'GET',
         okBody: { budgets: [{ id: 'b1' }] },
@@ -466,7 +526,7 @@ describe('lib/api', () => {
       },
       {
         name: 'upsertBudget',
-        call: () => upsertBudget('Dining', 500, 'tok'),
+        call: () => upsertBudget('Dining', 500),
         url: '/api/v1/budgets',
         method: 'POST',
         body: { category: 'Dining', monthlyLimit: 500 },
@@ -476,21 +536,12 @@ describe('lib/api', () => {
       },
       {
         name: 'deleteBudget',
-        call: () => deleteBudget('b1', 'tok'),
+        call: () => deleteBudget('b1'),
         url: '/api/v1/budgets/b1',
         method: 'DELETE',
         okBody: {},
         expected: undefined,
         fallback: 'Failed to delete budget',
-      },
-      {
-        name: 'logout',
-        call: () => logout('tok'),
-        url: '/api/v1/auth/logout',
-        method: 'POST',
-        okBody: { message: 'Signed out successfully' },
-        expected: undefined,
-        fallback: 'Failed to sign out',
       },
     ];
 
@@ -524,6 +575,253 @@ describe('lib/api', () => {
 
         await expect(call()).rejects.toEqual({ message: fallback, code: 500 });
       });
+
+      it('rejects with the default message when the error body is not JSON', async () => {
+        mockFetchSequence({ status: 502, nonJson: true });
+
+        await expect(call()).rejects.toEqual({ message: fallback, code: 502 });
+      });
+
+      it('on 401: renews the session once and retries the same request with the new token', async () => {
+        mockFetchSequence({ status: 401, body: { error: 'Invalid or expired token' } }, { status: 200, body: okBody });
+        provider.refreshAfterUnauthorized.mockResolvedValueOnce('renewed');
+
+        await expect(call()).resolves.toEqual(expected);
+
+        expect(provider.refreshAfterUnauthorized).toHaveBeenCalledTimes(1);
+        expect(provider.refreshAfterUnauthorized).toHaveBeenCalledWith('tok');
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        const [firstUrl, first = {}] = fetchCall(0);
+        const [retryUrl, retry = {}] = fetchCall(1);
+        expect(first.headers.Authorization).toBe('Bearer tok');
+        expect(retry.headers.Authorization).toBe('Bearer renewed');
+        expect(retryUrl).toBe(firstUrl);
+        expect(retry.method).toBe(first.method);
+        expect(retry.body).toBe(first.body);
+      });
+
+      it('on 401 when the session cannot be renewed: rejects with the 401, no retry', async () => {
+        mockFetchSequence({ status: 401, body: { error: 'Invalid or expired token' } });
+
+        await expect(call()).rejects.toEqual({ message: 'Invalid or expired token', code: 401 });
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  describe('authenticated requests: renewal rules (authedFetch)', () => {
+    it('retries only once: a second 401 after renewing is returned, not renewed again', async () => {
+      mockFetchSequence({ status: 401, body: { error: 'Invalid or expired token' } });
+      provider.refreshAfterUnauthorized.mockResolvedValue('renewed');
+
+      await expect(getBudgets()).rejects.toEqual({ message: 'Invalid or expired token', code: 401 });
+
+      expect(provider.refreshAfterUnauthorized).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([400, 403, 404, 409, 429, 500, 503])('a %i is never treated as an auth failure (no renewal, no retry)', async (status) => {
+      mockFetchSequence({ status, body: { error: `status ${status}` } });
+
+      await expect(getReceipts()).rejects.toEqual({ message: `status ${status}`, code: status });
+
+      expect(provider.refreshAfterUnauthorized).not.toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks the provider for the token on every call (so a renewed one is used next time)', async () => {
+      mockFetchSequence({ status: 200, body: { receipts: [] } });
+      provider.getAccessToken.mockResolvedValueOnce('first').mockResolvedValueOnce('second');
+
+      await getReceipts();
+      await getReceipts();
+
+      expect(fetchCall(0)[1].headers.Authorization).toBe('Bearer first');
+      expect(fetchCall(1)[1].headers.Authorization).toBe('Bearer second');
+    });
+
+    it('signed out (provider has no token): rejects with the session-expired message without calling the backend', async () => {
+      mockFetchSequence({ status: 200, body: {} });
+      provider.getAccessToken.mockResolvedValueOnce(null);
+
+      await expect(getReceipts()).rejects.toEqual({ message: SESSION_EXPIRED_MESSAGE, code: 401 });
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(SESSION_EXPIRED_MESSAGE).toBe('Your session expired, please sign in again');
+    });
+
+    it('no provider installed: rejects the same way', async () => {
+      setAccessTokenProvider(null);
+      mockFetchSequence({ status: 200, body: {} });
+
+      await expect(getBudgets()).rejects.toEqual({ message: SESSION_EXPIRED_MESSAGE, code: 401 });
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('an error response with a null JSON body uses the fallback message', async () => {
+      mockFetchSequence({ status: 500, body: null });
+
+      await expect(getBudgets()).rejects.toEqual({ message: 'Failed to load budgets', code: 500 });
+    });
+
+    it('a network failure on the retry propagates untouched', async () => {
+      const networkError = new TypeError('Network request failed');
+      global.fetch = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ error: 'expired' }) })
+        .mockRejectedValueOnce(networkError) as jest.Mock;
+      provider.refreshAfterUnauthorized.mockResolvedValueOnce('renewed');
+
+      await expect(getReceipts()).rejects.toBe(networkError);
+    });
+  });
+
+  // lib/api + the real lib/session manager: what the app actually runs.
+  describe('with the session manager as provider', () => {
+    const session = (n: number) => ({
+      access_token: `acc-${n}`,
+      refresh_token: `ref-${n}`,
+      expires_in: 3600,
+      user: { email: 'a@b.com', name: null },
+    });
+
+    function setup(refresh: jest.Mock) {
+      const onRefreshed = jest.fn();
+      const onExpired = jest.fn();
+      const manager = createSessionManager({ refresh, onRefreshed, onExpired });
+      manager.setSession({ accessToken: 'acc-0', refreshToken: 'ref-0', expiresAt: Date.now() + 3_600_000 });
+      setAccessTokenProvider(manager);
+      return { manager, onRefreshed, onExpired };
+    }
+
+    /** 401 for the stale token, 200 for any other. */
+    function backendAccepting(validToken: string) {
+      global.fetch = jest.fn(async (_url: string, init: any) =>
+        init.headers.Authorization === `Bearer ${validToken}`
+          ? { ok: true, status: 200, json: async () => ({ receipts: [], budgets: [] }) }
+          : { ok: false, status: 401, json: async () => ({ error: 'Invalid or expired token' }) }
+      ) as jest.Mock;
+    }
+
+    it('concurrent 401s share ONE refresh (the rotated refresh token is never sent twice) and all retry with the new token', async () => {
+      let resolveRefresh!: (v: unknown) => void;
+      const refresh = jest.fn(() => new Promise((res) => (resolveRefresh = res)));
+      const { manager, onRefreshed } = setup(refresh);
+      backendAccepting('acc-1');
+
+      const calls = [getReceipts(), getBudgets(), getReceipts()];
+      await waitForCondition(() => refresh.mock.calls.length === 1 && (global.fetch as jest.Mock).mock.calls.length === 3);
+      resolveRefresh(session(1));
+
+      await expect(Promise.all(calls)).resolves.toHaveLength(3);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith('ref-0');
+      expect(onRefreshed).toHaveBeenCalledTimes(1);
+      const retries = (global.fetch as jest.Mock).mock.calls.slice(3);
+      expect(retries.map(([, init]) => init.headers.Authorization)).toEqual(['Bearer acc-1', 'Bearer acc-1', 'Bearer acc-1']);
+      expect(manager.getSession()).toMatchObject({ accessToken: 'acc-1', refreshToken: 'ref-1' });
+      manager.dispose();
+    });
+
+    it('a 401 for a token that was already replaced retries with the current one, without another refresh', async () => {
+      const refresh = jest.fn(async () => session(1));
+      const { manager } = setup(refresh);
+      backendAccepting('acc-1');
+
+      await expect(getReceipts()).resolves.toEqual({ receipts: [], budgets: [] });
+      // Second call starts with acc-1 already — but pretend a request made
+      // with acc-0 comes back late: the manager answers with acc-1, no refresh.
+      await expect(manager.refreshAfterUnauthorized('acc-0')).resolves.toBe('acc-1');
+      expect(refresh).toHaveBeenCalledTimes(1);
+      manager.dispose();
+    });
+
+    it('a 429 on /refresh is NOT a dead session: the call rejects with the retryable 429, the session is kept, the next call renews', async () => {
+      const rateLimited = { message: 'Too many requests, please try again later.', code: 429 };
+      const refresh = jest.fn().mockRejectedValueOnce(rateLimited).mockResolvedValueOnce(session(1));
+      const { manager, onExpired } = setup(refresh);
+      backendAccepting('acc-1');
+
+      await expect(getReceipts()).rejects.toEqual(rateLimited);
+      expect(onExpired).not.toHaveBeenCalled();
+      expect(manager.getSession()).toMatchObject({ accessToken: 'acc-0', refreshToken: 'ref-0' });
+      expect(global.fetch).toHaveBeenCalledTimes(1); // no retry without a new token
+
+      await expect(getReceipts()).resolves.toEqual({ receipts: [], budgets: [] });
+      expect(refresh.mock.calls).toEqual([['ref-0'], ['ref-0']]);
+      manager.dispose();
+    });
+
+    it('a dead refresh token: every waiting call rejects, the user is signed out once, nothing is retried', async () => {
+      const refresh = jest.fn(async () => {
+        throw { message: 'Invalid or expired refresh token', code: 401 };
+      });
+      const { manager, onExpired } = setup(refresh);
+      backendAccepting('never');
+
+      const results = await Promise.allSettled([getReceipts(), getBudgets()]);
+
+      expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(onExpired).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      // Signed out now: later calls don't even reach the backend.
+      await expect(getReceipts()).rejects.toEqual({ message: SESSION_EXPIRED_MESSAGE, code: 401 });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      manager.dispose();
+    });
+  });
+
+  describe('logout', () => {
+    it('POSTs the access token (header) and the refresh token (body)', async () => {
+      mockFetchOnce(200, { message: 'Signed out successfully' });
+
+      await expect(logout({ accessToken: 'acc', refreshToken: 'ref' })).resolves.toBeUndefined();
+
+      const [url, options] = fetchCall(0);
+      expect(url).toBe(`${API_BASE_URL}/api/v1/auth/logout`);
+      expect(options.method).toBe('POST');
+      expect(options.headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer acc' });
+      expect(JSON.parse(options.body)).toEqual({ refresh_token: 'ref' });
+    });
+
+    it('sends only the refresh token when there is no access token', async () => {
+      mockFetchOnce(200, {});
+
+      await logout({ accessToken: null, refreshToken: 'ref' });
+
+      const [, options] = fetchCall(0);
+      expect(options.headers).toEqual({ 'Content-Type': 'application/json' });
+      expect(JSON.parse(options.body)).toEqual({ refresh_token: 'ref' });
+    });
+
+    it('sends an empty body when there is no refresh token', async () => {
+      mockFetchOnce(200, {});
+
+      await logout({ accessToken: 'acc', refreshToken: null });
+
+      expect(JSON.parse(fetchCall(0)[1].body)).toEqual({});
+    });
+
+    it('makes no request when there is no token at all', async () => {
+      mockFetchOnce(200, {});
+
+      await expect(logout({ accessToken: null, refreshToken: null })).resolves.toBeUndefined();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('never renews or retries, and never asks the provider (a 401 just rejects)', async () => {
+      mockFetchSequence({ status: 401, body: { error: 'nope' } });
+
+      await expect(logout({ accessToken: 'acc', refreshToken: 'ref' })).rejects.toEqual({ message: 'nope', code: 401 });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(provider.getAccessToken).not.toHaveBeenCalled();
+      expect(provider.refreshAfterUnauthorized).not.toHaveBeenCalled();
+    });
+
+    it('rejects with a default message when the backend gives none', async () => {
+      mockFetchOnce(500, {});
+
+      await expect(logout({ accessToken: 'acc', refreshToken: 'ref' })).rejects.toEqual({ message: 'Failed to sign out', code: 500 });
     });
   });
 

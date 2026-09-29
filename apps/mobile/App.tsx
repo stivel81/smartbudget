@@ -1,14 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, View } from 'react-native';
 import { NavigationContainer, NavigationProp } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
-import { logout as logoutApi, refreshSession as refreshSessionApi } from './lib/api';
+import {
+  logout as logoutApi,
+  refreshSession as refreshSessionApi,
+  setAccessTokenProvider,
+  SESSION_EXPIRED_MESSAGE,
+} from './lib/api';
 import { COLORS } from './lib/theme';
 import { AuthContext } from './lib/auth';
+import { createSessionManager, sessionExpiresAtMs, SessionManager, SessionPayload } from './lib/session';
 import type { AuthStackParamList, SignedInStackParamList } from './lib/navigation';
 
 // Import screens
@@ -103,9 +109,70 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
+
+  // Keeps the access token valid while the app runs (lib/session.ts): renews
+  // it shortly before expiry, on return to the foreground, and on any 401
+  // (lib/api.ts retries the request once). Its callbacks only use state
+  // setters, which are stable, so one manager serves the App's lifetime.
+  const sessionManagerRef = useRef<SessionManager | null>(null);
+  if (!sessionManagerRef.current) {
+    sessionManagerRef.current = createSessionManager({
+      refresh: async (token) => (await refreshSessionApi(token)).session,
+      onRefreshed: (session: SessionPayload, sessionExpiresAt: number | null) => {
+        setAccessToken(session.access_token);
+        // Supabase rotates refresh tokens: the new one is persisted by the
+        // storage effect below (the old one no longer works).
+        setRefreshToken(session.refresh_token);
+        setExpiresAt(sessionExpiresAt);
+        setUserEmail(session.user.email);
+        // An older backend sends no name — keep the one we have.
+        if (session.user.name) setUserName(session.user.name);
+      },
+      onExpired: () => {
+        // The refresh token was rejected: sign out locally (storage effects
+        // clear what was persisted) and explain why on the Login screen.
+        setAccessToken(null);
+        setRefreshToken(null);
+        setExpiresAt(null);
+        setUserEmail(null);
+        setUserName(null);
+        setSessionNotice(SESSION_EXPIRED_MESSAGE);
+        setIsAuthenticated(false);
+      },
+    });
+  }
+  const sessionManager = sessionManagerRef.current;
+
+  // Layout effect for the same reason as the session sync below: lib/api
+  // must have its token source before any screen's first load runs.
+  useLayoutEffect(() => {
+    setAccessTokenProvider(sessionManager);
+    const subscription = AppState.addEventListener('change', (state) =>
+      sessionManager.handleAppStateChange(state)
+    );
+    return () => {
+      subscription.remove();
+      setAccessTokenProvider(null);
+      sessionManager.dispose();
+    };
+  }, [sessionManager]);
+
+  // The manager tracks whatever session the auth state holds — however it
+  // got there (login, signup verify, password reset, launch restore, or the
+  // manager's own renewal, which it recognizes and ignores). A layout
+  // effect: those all run before any passive effect, so a screen's first
+  // load (useFocusEffect, a passive effect in a child — which would run
+  // before this App's own passive effects) already finds the session here.
+  useLayoutEffect(() => {
+    sessionManager.setSession(
+      accessToken && refreshToken ? { accessToken, refreshToken, expiresAt } : null
+    );
+  }, [sessionManager, accessToken, refreshToken, expiresAt]);
 
   // Restore a persisted session once on launch by exchanging the stored
   // refresh token for a fresh access token, so the app doesn't drop back
@@ -119,6 +186,7 @@ export default function App() {
         const { session } = await refreshSessionApi(storedRefreshToken);
         setAccessToken(session.access_token);
         setRefreshToken(session.refresh_token);
+        setExpiresAt(sessionExpiresAtMs(session));
         setUserEmail(session.user.email);
         // The refreshed session carries the current name; an older backend
         // doesn't send one, so fall back to the name persisted last time.
@@ -164,16 +232,22 @@ export default function App() {
   }, [userName, isRestoring]);
 
   const logout = async () => {
-    if (accessToken) {
-      try {
-        await logoutApi(accessToken);
-      } catch {
-        // Best-effort — the token may already be expired/revoked server-side.
-        // Clear the local session regardless.
-      }
+    // Use the manager's tokens: they are the newest (a renewal may have
+    // landed after this render). Detach first so no timer/renewal runs
+    // during or after sign-out.
+    const tokens = sessionManager.getSession() ?? { accessToken, refreshToken };
+    sessionManager.setSession(null);
+    try {
+      // Sends the refresh token too, so the backend revokes the session
+      // even when the access token has already expired.
+      await logoutApi({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+    } catch {
+      // Best-effort — the backend logs what it couldn't revoke. Clear the
+      // local session regardless.
     }
     setAccessToken(null);
     setRefreshToken(null);
+    setExpiresAt(null);
     setUserEmail(null);
     setUserName(null);
     setIsAuthenticated(false);
@@ -201,6 +275,10 @@ export default function App() {
           setUserEmail,
           userName,
           setUserName,
+          expiresAt,
+          setExpiresAt,
+          sessionNotice,
+          setSessionNotice,
           logout,
         }}
       >

@@ -12,6 +12,10 @@ export interface LoginResponse {
   session: {
     access_token: string;
     refresh_token: string;
+    /** Access-token expiry, unix seconds (absent/null from an older backend). */
+    expires_at?: number | null;
+    /** Access-token lifetime in seconds (absent/null from an older backend). */
+    expires_in?: number | null;
     user: {
       id: string;
       email: string;
@@ -40,6 +44,109 @@ export interface ApiError {
   code?: number | string;
   /** Machine-readable backend error code, when the backend sends one (e.g. 'email_not_confirmed'). */
   errorCode?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated requests
+//
+// Every call that needs the user's access token goes through authedRequest
+// (below). It gets the token from an injected AccessTokenProvider — App.tsx
+// wires in lib/session's manager — instead of taking it from each caller, so
+// screens never deal with expiry: on a 401 the provider renews the session
+// once (single-flight across concurrent calls) and the request is retried
+// once with the new token. Injected rather than imported so this module
+// depends on nothing in lib/ (no require cycles).
+// ---------------------------------------------------------------------------
+
+export interface AccessTokenProvider {
+  /** A usable access token (renewed first when it is about to expire), or null when signed out. */
+  getAccessToken(): Promise<string | null>;
+  /**
+   * `rejectedToken` got a 401: resolve a renewed token to retry with, or
+   * null when the session can't be renewed (the provider signs the user out
+   * itself when the refresh token is dead). Rejects when renewal failed
+   * transiently (offline, 429, 5xx): that error is what the call rejects
+   * with — retryable, and the session is kept.
+   */
+  refreshAfterUnauthorized(rejectedToken: string): Promise<string | null>;
+}
+
+let accessTokenProvider: AccessTokenProvider | null = null;
+
+/** Install (App mount) or remove (App unmount, tests) the source of access tokens. */
+export function setAccessTokenProvider(provider: AccessTokenProvider | null): void {
+  accessTokenProvider = provider;
+}
+
+/** Shown on Login after the session could not be renewed, and thrown by authed calls made while signed out. */
+export const SESSION_EXPIRED_MESSAGE = 'Your session expired, please sign in again';
+
+/** The only place an Authorization header is built. */
+function bearerHeaders(accessToken: string, json: boolean): Record<string, string> {
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
+/** ApiError for a non-2xx response: the backend's `error` text (or `fallback`) plus the HTTP status. */
+async function toApiError(response: Response, fallback: string): Promise<ApiError> {
+  let body: { error?: unknown } = {};
+  try {
+    body = (await response.json()) ?? {};
+  } catch {
+    // Non-JSON error body (proxy page, empty 502...): use the fallback.
+  }
+  return {
+    message: typeof body.error === 'string' && body.error ? body.error : fallback,
+    code: response.status,
+  };
+}
+
+interface AuthedRequestInit {
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  /** JSON-serialized as the request body (and sets Content-Type). */
+  body?: unknown;
+}
+
+/**
+ * fetch() an authenticated backend route. 401 -> renew the session once and
+ * retry once; a second 401, or no renewed token, is returned as is; a
+ * transient renewal failure rejects with its own (retryable) error. Other
+ * statuses are never retried.
+ */
+async function authedFetch(path: string, init: AuthedRequestInit): Promise<Response> {
+  const token = accessTokenProvider ? await accessTokenProvider.getAccessToken() : null;
+  if (!token) {
+    throw { message: SESSION_EXPIRED_MESSAGE, code: 401 } as ApiError;
+  }
+
+  const hasBody = init.body !== undefined;
+  const send = (accessToken: string) =>
+    fetch(`${API_BASE_URL}${path}`, {
+      ...(init.method && init.method !== 'GET' ? { method: init.method } : {}),
+      headers: bearerHeaders(accessToken, hasBody),
+      ...(hasBody ? { body: JSON.stringify(init.body) } : {}),
+    });
+
+  const response = await send(token);
+  if (response.status !== 401 || !accessTokenProvider) return response;
+
+  const renewed = await accessTokenProvider.refreshAfterUnauthorized(token);
+  return renewed ? send(renewed) : response;
+}
+
+/** authedFetch, then the JSON body on 2xx or a thrown ApiError (backend message or `fallback`). */
+async function authedRequest<T>(path: string, init: AuthedRequestInit, fallback: string): Promise<T> {
+  const response = await authedFetch(path, init);
+  if (!response.ok) throw await toApiError(response, fallback);
+  return response.json();
+}
+
+/** authedFetch for routes whose success body is ignored. */
+async function authedRequestNoContent(path: string, init: AuthedRequestInit, fallback: string): Promise<void> {
+  const response = await authedFetch(path, init);
+  if (!response.ok) throw await toApiError(response, fallback);
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -108,47 +215,19 @@ export interface GetReceiptsResponse {
   receipts: Receipt[];
 }
 
-export async function scanReceipt(
+export function scanReceipt(
   base64Image: string,
-  mediaType: 'image/jpeg' | 'image/png',
-  accessToken: string
+  mediaType: 'image/jpeg' | 'image/png'
 ): Promise<ScanReceiptResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/scan`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ image: base64Image, mediaType }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to scan receipt',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+  return authedRequest(
+    '/api/v1/receipts/scan',
+    { method: 'POST', body: { image: base64Image, mediaType } },
+    'Failed to scan receipt'
+  );
 }
 
-export async function getReceipts(accessToken: string): Promise<GetReceiptsResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/receipts`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to load receipts',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+export function getReceipts(): Promise<GetReceiptsResponse> {
+  return authedRequest('/api/v1/receipts', {}, 'Failed to load receipts');
 }
 
 /** Re-categorize one line item: raw_response.items[index].category = category. */
@@ -165,74 +244,26 @@ export interface ReceiptUpdates {
   items?: ItemCategoryUpdate[];
 }
 
-export async function updateReceipt(
-  id: string,
-  updates: ReceiptUpdates,
-  accessToken: string
-): Promise<ScanReceiptResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(updates),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to update receipt',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+export function updateReceipt(id: string, updates: ReceiptUpdates): Promise<ScanReceiptResponse> {
+  return authedRequest(`/api/v1/receipts/${id}`, { method: 'PATCH', body: updates }, 'Failed to update receipt');
 }
 
 /** Change line-item categories on a saved receipt (PATCH items). Resolves with the updated receipt. */
-export function updateItemCategories(
-  id: string,
-  items: ItemCategoryUpdate[],
-  accessToken: string
-): Promise<ScanReceiptResponse> {
-  return updateReceipt(id, { items }, accessToken);
+export function updateItemCategories(id: string, items: ItemCategoryUpdate[]): Promise<ScanReceiptResponse> {
+  return updateReceipt(id, { items });
 }
 
-export async function getReceiptImageUrl(id: string, accessToken: string): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}/image-url`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to load receipt image',
-      code: response.status,
-    } as ApiError;
-  }
-
-  const { url } = await response.json();
+export async function getReceiptImageUrl(id: string): Promise<string> {
+  const { url } = await authedRequest<{ url: string }>(
+    `/api/v1/receipts/${id}/image-url`,
+    {},
+    'Failed to load receipt image'
+  );
   return url;
 }
 
-export async function deleteReceipt(id: string, accessToken: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to delete receipt',
-      code: response.status,
-    } as ApiError;
-  }
+export function deleteReceipt(id: string): Promise<void> {
+  return authedRequestNoContent(`/api/v1/receipts/${id}`, { method: 'DELETE' }, 'Failed to delete receipt');
 }
 
 export interface Budget {
@@ -252,81 +283,39 @@ export interface UpsertBudgetResponse {
   budget: Budget;
 }
 
-export async function getBudgets(accessToken: string): Promise<GetBudgetsResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/budgets`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to load budgets',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+export function getBudgets(): Promise<GetBudgetsResponse> {
+  return authedRequest('/api/v1/budgets', {}, 'Failed to load budgets');
 }
 
-export async function upsertBudget(
-  category: string,
-  monthlyLimit: number,
-  accessToken: string
-): Promise<UpsertBudgetResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/budgets`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ category, monthlyLimit }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to save budget',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+export function upsertBudget(category: string, monthlyLimit: number): Promise<UpsertBudgetResponse> {
+  return authedRequest('/api/v1/budgets', { method: 'POST', body: { category, monthlyLimit } }, 'Failed to save budget');
 }
 
-export async function deleteBudget(id: string, accessToken: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/budgets/${id}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to delete budget',
-      code: response.status,
-    } as ApiError;
-  }
+export function deleteBudget(id: string): Promise<void> {
+  return authedRequestNoContent(`/api/v1/budgets/${id}`, { method: 'DELETE' }, 'Failed to delete budget');
 }
 
-export async function logout(accessToken: string): Promise<void> {
+export interface LogoutTokens {
+  accessToken: string | null;
+  refreshToken: string | null;
+}
+
+/**
+ * Revoke the session server-side. Sends both tokens as they are — no
+ * renewal/retry (renewing just to sign out would be wasteful, and the
+ * session manager is already detached by then): the backend revokes via the
+ * refresh token when the access token has expired, and answers 200 whenever
+ * a token is given. Resolves without a request when there is no token.
+ */
+export async function logout({ accessToken, refreshToken }: LogoutTokens): Promise<void> {
+  if (!accessToken && !refreshToken) return;
   const response = await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers: accessToken ? bearerHeaders(accessToken, true) : { 'Content-Type': 'application/json' },
+    body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Failed to sign out',
-      code: response.status,
-    } as ApiError;
-  }
+  if (!response.ok) throw await toApiError(response, 'Failed to sign out');
 }
 
 export async function signup(
@@ -418,30 +407,14 @@ export interface ChangePasswordResponse {
  * Change the signed-in user's password. The backend verifies
  * `currentPassword` first; a wrong one rejects with code 400 and the
  * message "Current password is incorrect". The current session stays valid.
+ * (A 400 is never treated as an expired session — only 401 triggers renewal.)
  */
-export async function changePassword(
-  currentPassword: string,
-  newPassword: string,
-  accessToken: string
-): Promise<ChangePasswordResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/change-password`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ currentPassword, newPassword }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Could not change password',
-      code: response.status,
-    } as ApiError;
-  }
-
-  return response.json();
+export function changePassword(currentPassword: string, newPassword: string): Promise<ChangePasswordResponse> {
+  return authedRequest(
+    '/api/v1/auth/change-password',
+    { method: 'POST', body: { currentPassword, newPassword } },
+    'Could not change password'
+  );
 }
 
 export interface ResendSignupResponse {

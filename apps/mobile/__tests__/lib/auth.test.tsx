@@ -7,13 +7,17 @@ import { AuthContext, AuthContextType, applySession, useAuth } from '../../lib/a
 
 function Probe() {
   const auth = useAuth();
-  return <Text testID="probe">{`${auth.isAuthenticated}|${auth.accessToken}|${auth.userEmail}|${auth.userName}`}</Text>;
+  return (
+    <Text testID="probe">
+      {`${auth.isAuthenticated}|${auth.accessToken}|${auth.userEmail}|${auth.userName}|${auth.expiresAt}|${auth.sessionNotice}`}
+    </Text>
+  );
 }
 
 describe('lib/auth', () => {
   it('useAuth returns the default (signed-out) value without a provider', async () => {
     render(<Probe />);
-    expect(screen.getByTestId('probe').props.children).toBe('false|null|null|null');
+    expect(screen.getByTestId('probe').props.children).toBe('false|null|null|null|null|null');
   });
 
   it('default context callbacks are harmless no-ops', async () => {
@@ -29,6 +33,8 @@ describe('lib/auth', () => {
       captured.setRefreshToken('x');
       captured.setUserEmail('x');
       captured.setUserName('x');
+      captured.setExpiresAt(1);
+      captured.setSessionNotice('x');
     }).not.toThrow();
     await expect(captured.logout()).resolves.toBeUndefined();
   });
@@ -45,6 +51,10 @@ describe('lib/auth', () => {
       setUserEmail: jest.fn(),
       userName: 'Ada Lovelace',
       setUserName: jest.fn(),
+      expiresAt: 123,
+      setExpiresAt: jest.fn(),
+      sessionNotice: 'Your session expired, please sign in again',
+      setSessionNotice: jest.fn(),
       logout: jest.fn(async () => {}),
     };
     render(
@@ -52,7 +62,7 @@ describe('lib/auth', () => {
         <Probe />
       </AuthContext.Provider>
     );
-    expect(screen.getByTestId('probe').props.children).toBe('true|tok|a@b.com|Ada Lovelace');
+    expect(screen.getByTestId('probe').props.children).toBe('true|tok|a@b.com|Ada Lovelace|123|Your session expired, please sign in again');
   });
 
   describe('applySession', () => {
@@ -70,20 +80,31 @@ describe('lib/auth', () => {
         setUserEmail: record('setUserEmail'),
         userName: null,
         setUserName: record('setUserName'),
+        expiresAt: null,
+        setExpiresAt: record('setExpiresAt'),
+        sessionNotice: 'Your session expired, please sign in again',
+        setSessionNotice: record('setSessionNotice'),
         logout: jest.fn(async () => {}),
         // expose call order for the assertion below
         ...({ calls } as object),
       } as AuthContextType;
     }
 
-    it('stores tokens, email and name, and flips isAuthenticated last', () => {
+    it('stores tokens, expiry, email and name, clears the Login notice, and flips isAuthenticated last', () => {
       const auth = mockAuth();
+      jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
 
       applySession(auth, {
         access_token: 'acc',
         refresh_token: 'ref',
+        expires_in: 3600,
+        expires_at: 999,
         user: { email: 'a@b.com', name: 'Adrian Schtivelmager' },
       });
+      (Date.now as jest.Mock).mockRestore();
+
+      expect(auth.setExpiresAt).toHaveBeenCalledWith(1_000_000 + 3_600_000);
+      expect(auth.setSessionNotice).toHaveBeenCalledWith(null);
 
       expect(auth.setAccessToken).toHaveBeenCalledWith('acc');
       expect(auth.setRefreshToken).toHaveBeenCalledWith('ref');
@@ -92,7 +113,15 @@ describe('lib/auth', () => {
       expect(auth.setIsAuthenticated).toHaveBeenCalledWith(true);
       const calls = (auth as unknown as { calls: string[] }).calls;
       expect(calls[calls.length - 1]).toBe('setIsAuthenticated');
-      expect(calls).toHaveLength(5);
+      expect(calls).toHaveLength(7);
+    });
+
+    it('stores a null expiry when an older backend sends none', () => {
+      const auth = mockAuth();
+
+      applySession(auth, { access_token: 'acc', refresh_token: 'ref', user: { email: 'a@b.com' } });
+
+      expect(auth.setExpiresAt).toHaveBeenCalledWith(null);
     });
 
     it.each([

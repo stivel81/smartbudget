@@ -49,6 +49,10 @@ function renderVerify(params: { email: string; sendCode?: boolean } = { email: E
     setUserEmail: jest.fn(),
     userName: null,
     setUserName: jest.fn(),
+    expiresAt: null,
+    setExpiresAt: jest.fn(),
+    sessionNotice: null,
+    setSessionNotice: jest.fn(),
     logout: jest.fn(async () => {}),
   };
 

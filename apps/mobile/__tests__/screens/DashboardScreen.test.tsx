@@ -55,6 +55,10 @@ function renderDashboard(
         setUserEmail: () => {},
         userName,
         setUserName: () => {},
+        expiresAt: null,
+        setExpiresAt: () => {},
+        sessionNotice: null,
+        setSessionNotice: () => {},
         logout: async () => {},
       }}
     >
@@ -698,7 +702,7 @@ describe('DashboardScreen', () => {
 
       fireEvent.press(screen.getByTestId('receipt-item-r1'));
 
-      await waitFor(() => expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token'));
+      await waitFor(() => expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1'));
       await waitFor(() => expect(screen.getByTestId('receipt-modal-close')).toBeTruthy());
     });
 
@@ -826,7 +830,7 @@ describe('DashboardScreen', () => {
 
       expect(await screen.findByText('19/01/2026 · ₪2,847.30')).toBeTruthy();
       // Let the image URL request settle inside the test.
-      expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token');
+      expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1');
       await waitFor(() => expect(screen.UNSAFE_getByType(Image).props.source).toEqual({ uri: 'https://example.com/r1.jpg' }));
     });
   });
@@ -1117,7 +1121,7 @@ describe('DashboardScreen', () => {
       fireEvent.press(screen.getByTestId('category-option-Groceries'));
 
       expect(screen.queryByTestId('category-picker')).toBeNull();
-      expect(mockUpdateItemCategories).toHaveBeenCalledWith('r1', [{ index: 0, category: 'Groceries' }], 'test-token');
+      expect(mockUpdateItemCategories).toHaveBeenCalledWith('r1', [{ index: 0, category: 'Groceries' }]);
 
       await waitFor(() => expect(chipLabel(0)).toBe('Category for כללי: Groceries. Change category'));
       expect(screen.getByTestId('category-card-Groceries')).toBeTruthy();

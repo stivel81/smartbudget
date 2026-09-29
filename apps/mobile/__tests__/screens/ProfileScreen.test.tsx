@@ -35,6 +35,10 @@ function renderProfile(overrides: Partial<AuthContextType> = {}) {
     setUserEmail: () => {},
     userName: null,
     setUserName: () => {},
+    expiresAt: null,
+    setExpiresAt: () => {},
+    sessionNotice: null,
+    setSessionNotice: () => {},
     logout: jest.fn(async () => {}),
     ...overrides,
   };

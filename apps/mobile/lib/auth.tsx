@@ -3,6 +3,9 @@
 // in App.tsx so screens don't import App.tsx — that made a require cycle
 // (App.tsx -> screens/*.tsx -> App.tsx) that Metro warns about.
 import React, { useContext } from 'react';
+import { SessionPayload, sessionExpiresAtMs } from './session';
+
+export type { SessionPayload } from './session';
 
 export interface AuthContextType {
   isAuthenticated: boolean;
@@ -16,6 +19,12 @@ export interface AuthContextType {
   /** Display name from signup ("Adrian Schtivelmager"); null when unknown. */
   userName: string | null;
   setUserName: (name: string | null) => void;
+  /** When the access token expires (epoch ms, device clock); null when unknown/signed out. */
+  expiresAt: number | null;
+  setExpiresAt: (expiresAt: number | null) => void;
+  /** One-off message for the Login screen, e.g. "Your session expired…"; cleared on sign-in. */
+  sessionNotice: string | null;
+  setSessionNotice: (notice: string | null) => void;
   logout: () => Promise<void>;
 }
 
@@ -30,19 +39,16 @@ export const AuthContext = React.createContext<AuthContextType>({
   setUserEmail: () => {},
   userName: null,
   setUserName: () => {},
+  expiresAt: null,
+  setExpiresAt: () => {},
+  sessionNotice: null,
+  setSessionNotice: () => {},
   logout: async () => {},
 });
 
 /** The current auth context value. */
 export function useAuth(): AuthContextType {
   return useContext(AuthContext);
-}
-
-/** The session every sign-in endpoint returns (login, refresh, reset-password, verify-signup). */
-export interface SessionPayload {
-  access_token: string;
-  refresh_token: string;
-  user: { email: string; name?: string | null };
 }
 
 /**
@@ -53,7 +59,9 @@ export interface SessionPayload {
 export function applySession(auth: AuthContextType, session: SessionPayload): void {
   auth.setAccessToken(session.access_token);
   auth.setRefreshToken(session.refresh_token);
+  auth.setExpiresAt(sessionExpiresAtMs(session));
   auth.setUserEmail(session.user.email);
   auth.setUserName(session.user.name ?? null);
+  auth.setSessionNotice(null);
   auth.setIsAuthenticated(true);
 }

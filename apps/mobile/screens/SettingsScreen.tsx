@@ -103,7 +103,7 @@ export default function SettingsScreen(): React.ReactElement {
 
     setSaving(true);
     try {
-      await changePassword(currentPassword, newPassword, auth.accessToken);
+      await changePassword(currentPassword, newPassword);
       setCurrentPassword('');
       setNewPassword('');
       setShowCurrent(false);

@@ -42,6 +42,10 @@ function renderSettings(overrides: Partial<AuthContextType> = {}) {
     setUserEmail: jest.fn(),
     userName: null,
     setUserName: jest.fn(),
+    expiresAt: null,
+    setExpiresAt: jest.fn(),
+    sessionNotice: null,
+    setSessionNotice: jest.fn(),
     logout: jest.fn(async () => {}),
     ...overrides,
   };
@@ -179,7 +183,7 @@ describe('SettingsScreen', () => {
 
       await waitFor(() => expect(screen.getByTestId('settings-success')).toBeTruthy());
       expect(mockChangePassword).toHaveBeenCalledTimes(1);
-      expect(mockChangePassword).toHaveBeenCalledWith('oldpassword', 'newpassword1', 'test-token');
+      expect(mockChangePassword).toHaveBeenCalledWith('oldpassword', 'newpassword1');
     });
 
     it('on success shows the message, clears and re-masks both fields', async () => {
