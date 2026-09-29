@@ -1,15 +1,7 @@
 // API base URL for backend communication
 export const API_BASE_URL = 'http://localhost:3000';
 
-// Must stay in sync with RECEIPT_CATEGORIES in apps/backend/src/services/claude.ts
-export const RECEIPT_CATEGORIES = [
-  'Groceries',
-  'Dining',
-  'Transport',
-  'Entertainment',
-  'Health',
-  'Other',
-] as const;
+export { RECEIPT_CATEGORIES } from './categories';
 
 export interface LoginRequest {
   email: string;
@@ -95,7 +87,8 @@ export async function refreshSession(refreshToken: string): Promise<LoginRespons
 export interface ReceiptExtraction {
   merchant: string;
   total: number;
-  date: string;
+  /** ISO "YYYY-MM-DD" (null when the receipt had no legible date; older rows may hold other strings). */
+  date: string | null;
   items: { name: string; amount: number; category: string }[];
 }
 
@@ -158,9 +151,23 @@ export async function getReceipts(accessToken: string): Promise<GetReceiptsRespo
   return response.json();
 }
 
+/** Re-categorize one line item: raw_response.items[index].category = category. */
+export interface ItemCategoryUpdate {
+  index: number;
+  category: string;
+}
+
+export interface ReceiptUpdates {
+  merchant?: string;
+  total?: number;
+  /** ISO "YYYY-MM-DD" or day-first "DD/MM/YYYY"; the backend stores ISO. */
+  date?: string;
+  items?: ItemCategoryUpdate[];
+}
+
 export async function updateReceipt(
   id: string,
-  updates: { merchant?: string; total?: number; date?: string },
+  updates: ReceiptUpdates,
   accessToken: string
 ): Promise<ScanReceiptResponse> {
   const response = await fetch(`${API_BASE_URL}/api/v1/receipts/${id}`, {
@@ -181,6 +188,15 @@ export async function updateReceipt(
   }
 
   return response.json();
+}
+
+/** Change line-item categories on a saved receipt (PATCH items). Resolves with the updated receipt. */
+export function updateItemCategories(
+  id: string,
+  items: ItemCategoryUpdate[],
+  accessToken: string
+): Promise<ScanReceiptResponse> {
+  return updateReceipt(id, { items }, accessToken);
 }
 
 export async function getReceiptImageUrl(id: string, accessToken: string): Promise<string> {

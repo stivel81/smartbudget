@@ -3,6 +3,8 @@ import {
   budgetsAtOrAbove,
   budgetsByCategory,
   categoryTotals,
+  formatDayMonthYear,
+  formatReceiptDate,
   isInMonth,
   parseReceiptDate,
   percentOf,
@@ -119,6 +121,52 @@ describe('receiptSpendDate', () => {
   it('falls back to created_at when raw_response itself is missing', () => {
     const r = { ...receipt('r1', { createdAt: created }), raw_response: undefined } as unknown as Receipt;
     expect(receiptSpendDate(r).getTime()).toBe(created.getTime());
+  });
+});
+
+describe('formatDayMonthYear', () => {
+  it.each([
+    [new Date(2026, 7, 17), '17/08/2026'],
+    [new Date(2026, 0, 1), '01/01/2026'],
+    [new Date(2026, 11, 31, 23, 59), '31/12/2026'],
+    [new Date(2024, 1, 29), '29/02/2024'],
+    [new Date(2026, 8, 5, 0, 0, 1), '05/09/2026'],
+  ])('formats %s day-first as %s', (date, expected) => {
+    expect(formatDayMonthYear(date)).toBe(expected);
+  });
+
+  it('shows a dash for an invalid Date instead of NaN', () => {
+    expect(formatDayMonthYear(new Date('nope'))).toBe('—');
+  });
+});
+
+describe('formatReceiptDate', () => {
+  const created = new Date(2026, 8, 29, 10, 0, 0);
+
+  it('shows an ISO receipt date as DD/MM/YYYY', () => {
+    expect(formatReceiptDate(receipt('r1', { date: '2026-08-17', createdAt: created }))).toBe('17/08/2026');
+  });
+
+  it('uses the local calendar day of an ISO date-time', () => {
+    expect(formatReceiptDate(receipt('r1', { date: new Date(2026, 7, 17, 23, 30).toISOString(), createdAt: created }))).toBe(
+      '17/08/2026'
+    );
+  });
+
+  it.each([
+    ['null (no date on the receipt)', null],
+    ['a legacy un-normalized day-first string', '17/08/2026'],
+    ['an impossible date', '2026-02-30'],
+  ])('falls back to the upload day when the date is %s', (_label, date) => {
+    expect(formatReceiptDate(receipt('r1', { date, createdAt: created }))).toBe('29/09/2026');
+  });
+
+  it('shows a dash when neither date is usable', () => {
+    expect(formatReceiptDate(receipt('r1', { date: null, createdAt: 'garbage' }))).toBe('—');
+  });
+
+  it('never returns the raw stored string', () => {
+    expect(formatReceiptDate(receipt('r1', { date: '2026-08-17', createdAt: created }))).not.toBe('2026-08-17');
   });
 });
 

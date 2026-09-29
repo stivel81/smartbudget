@@ -11,6 +11,7 @@ import {
   Alert,
   TextInput,
   LayoutChangeEvent,
+  ScrollView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,16 +23,21 @@ import { AuthContext } from '../lib/auth';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 import {
+  JPEG_QUALITY,
+  PICKER_QUALITY,
   ScanResult,
   categoryIconFor,
   resizeTargetFor,
   resolveReceiptEdits,
+  summarizeCategories,
   toScanResult,
+  withCategories,
 } from '../lib/scan';
+import { RECEIPT_CATEGORIES } from '../lib/categories';
 import { errorMessage } from '../lib/errors';
 import { formatCurrency } from '../lib/currency';
-
-const IMAGE_COMPRESSION = 0.7;
+import CategoryPicker from '../components/CategoryPicker';
+import ReceiptItemsList from '../components/ReceiptItemsList';
 const SCAN_LINE_HEIGHT = 2;
 const SCAN_LINE_DURATION_MS = 2000;
 const CORNER_SIZE = 22;
@@ -47,7 +53,7 @@ async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<str
   }
 
   const image = await context.renderAsync();
-  const result = await image.saveAsync({ format: SaveFormat.JPEG, compress: IMAGE_COMPRESSION, base64: true });
+  const result = await image.saveAsync({ format: SaveFormat.JPEG, compress: JPEG_QUALITY, base64: true });
   context.release();
   image.release();
 
@@ -106,6 +112,9 @@ export default function ScanScreen(): React.ReactElement {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [editedMerchant, setEditedMerchant] = useState('');
   const [editedTotal, setEditedTotal] = useState('');
+  // One category per line item (same order as result.items); starts as Claude's choice.
+  const [editedCategories, setEditedCategories] = useState<string[]>([]);
+  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -127,6 +136,8 @@ export default function ScanScreen(): React.ReactElement {
     setResult(scanned);
     setEditedMerchant(scanned.merchant);
     setEditedTotal(formatCurrency(scanned.total, { decimals: 2 }));
+    setEditedCategories(scanned.items.map((item) => item.category));
+    setPickerIndex(null);
     setShowResult(true);
 
     // Animate result card sliding up
@@ -163,7 +174,7 @@ export default function ScanScreen(): React.ReactElement {
     }
 
     const picked = await ImagePicker.launchCameraAsync({
-      quality: 0.7,
+      quality: PICKER_QUALITY,
     });
 
     if (!picked.canceled && picked.assets[0]) {
@@ -180,7 +191,7 @@ export default function ScanScreen(): React.ReactElement {
 
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.7,
+      quality: PICKER_QUALITY,
     });
 
     if (!picked.canceled && picked.assets[0]) {
@@ -224,7 +235,7 @@ export default function ScanScreen(): React.ReactElement {
       return;
     }
 
-    const outcome = resolveReceiptEdits(result, editedMerchant, editedTotal);
+    const outcome = resolveReceiptEdits(result, editedMerchant, editedTotal, editedCategories);
     if (outcome.kind === 'invalid') {
       Alert.alert(outcome.title, outcome.message);
       return;
@@ -245,7 +256,13 @@ export default function ScanScreen(): React.ReactElement {
     }
   };
 
+  const chooseCategory = (index: number, category: string) => {
+    setEditedCategories((prev) => prev.map((current, i) => (i === index ? category : current)));
+  };
+
   const busy = confirming || discarding;
+  const displayedItems = result ? withCategories(result.items, editedCategories) : [];
+  const categorySummary = result ? summarizeCategories(displayedItems) : '';
   const canCancel = showResult && result !== null && !busy;
   const scanLineTravel = Math.max(frameHeight - SCAN_LINE_HEIGHT, 0);
 
@@ -382,19 +399,19 @@ export default function ScanScreen(): React.ReactElement {
               <View style={styles.categoryValue}>
                 <View style={styles.categoryIcon}>
                   <MaterialCommunityIcons
-                    name={categoryIconFor(result.category) as keyof typeof MaterialCommunityIcons.glyphMap}
+                    name={categoryIconFor(categorySummary) as keyof typeof MaterialCommunityIcons.glyphMap}
                     size={16}
                     color={COLORS.textPrimary}
                   />
                 </View>
-                <Text style={styles.resultValue} numberOfLines={1}>
-                  {result.category}
+                <Text style={styles.resultValue} numberOfLines={1} testID="scan-category-summary">
+                  {categorySummary}
                 </Text>
               </View>
             </ResultRow>
 
             <ResultRow label="Date">
-              <Text style={styles.resultValue}>{result.date}</Text>
+              <Text style={styles.resultValue} testID="scan-date">{result.date}</Text>
             </ResultRow>
 
             <ResultRow label="Total" last>
@@ -408,6 +425,20 @@ export default function ScanScreen(): React.ReactElement {
               />
             </ResultRow>
           </View>
+
+          {displayedItems.length > 0 && (
+            <View style={styles.itemsSection}>
+              <Text style={styles.itemsLabel}>Items</Text>
+              <ScrollView style={styles.itemsScroll} nestedScrollEnabled testID="scan-items-scroll">
+                <ReceiptItemsList
+                  items={displayedItems}
+                  onPressCategory={setPickerIndex}
+                  disabled={busy}
+                  testIDPrefix="scan-item"
+                />
+              </ScrollView>
+            </View>
+          )}
 
           <TouchableOpacity
             style={[styles.saveButton, busy && styles.saveButtonDisabled]}
@@ -424,6 +455,17 @@ export default function ScanScreen(): React.ReactElement {
           </TouchableOpacity>
         </Animated.View>
       )}
+
+      {result && pickerIndex !== null && result.items[pickerIndex] ? (
+        <CategoryPicker
+          visible
+          categories={RECEIPT_CATEGORIES}
+          selected={editedCategories[pickerIndex] ?? null}
+          subtitle={result.items[pickerIndex].name}
+          onSelect={(category) => chooseCategory(pickerIndex, category)}
+          onClose={() => setPickerIndex(null)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -654,6 +696,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  itemsSection: {
+    marginBottom: SPACING.sectionMargin + 4,
+  },
+  itemsLabel: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  // Long receipts scroll inside the card instead of pushing Save off-screen.
+  itemsScroll: {
+    maxHeight: 176,
   },
   saveButton: {
     height: 50,

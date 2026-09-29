@@ -1,12 +1,23 @@
 // Pure helpers for the receipt scanner (ScanScreen). Kept free of React /
 // native modules so they can be unit-tested directly.
-import type { Receipt, ReceiptExtraction } from './api';
+import type { ItemCategoryUpdate, Receipt, ReceiptExtraction } from './api';
 import { CATEGORY_META } from './theme';
 import { parseAmountInput } from './currency';
+import { formatReceiptDate } from './spending';
 
-// Claude resizes any image above this (long edge) before billing/processing
-// it, so uploading larger buys nothing — this is also the size we store.
+// Claude (Haiku 4.5) resizes any image above this (long edge) before
+// billing/processing it, so uploading larger buys nothing — this is also the
+// size we store. Token cost depends only on pixel count (≈ w×h/750, capped
+// near 1,600 tokens by that server-side resize), never on JPEG quality.
 export const MAX_IMAGE_DIMENSION = 1568;
+
+// The photo is JPEG-encoded exactly once, by the resize step, at a quality
+// that keeps small receipt print (Hebrew diacritics, thin digits) crisp for
+// OCR. The picker hands over the original (quality 1) so the image isn't
+// compressed twice. A 1568px JPEG at 0.9 is well under Claude's 5 MB image
+// limit and the backend's 15 MB body limit.
+export const PICKER_QUALITY = 1;
+export const JPEG_QUALITY = 0.9;
 
 export type ResizeTarget = { width: number } | { height: number };
 
@@ -29,8 +40,10 @@ export interface ScanResult {
   id: string;
   merchant: string;
   category: string;
+  /** Display date, DD/MM/YYYY (see formatReceiptDate). */
   date: string;
   total: number;
+  items: ReceiptExtraction['items'];
 }
 
 export const UNCATEGORIZED = 'Uncategorized';
@@ -47,8 +60,9 @@ export function toScanResult(receipt: Receipt): ScanResult {
     id: receipt.id,
     merchant: extraction.merchant,
     category: summarizeCategories(extraction.items),
-    date: extraction.date,
+    date: formatReceiptDate(receipt),
     total: extraction.total,
+    items: extraction.items,
   };
 }
 
@@ -61,19 +75,49 @@ export function categoryIconFor(categorySummary: string): string {
   return (CATEGORY_META[first] ?? CATEGORY_META.Other).icon;
 }
 
+/** `items` with each line's category replaced by `categories[i]` (when given). */
+export function withCategories(
+  items: ReceiptExtraction['items'],
+  categories: readonly string[]
+): ReceiptExtraction['items'] {
+  return items.map((item, i) => (categories[i] !== undefined ? { ...item, category: categories[i] } : item));
+}
+
+/**
+ * The PATCH `items` entries for lines whose category the user changed:
+ * `categories[i]` vs `items[i].category`, in index order. Entries past the
+ * end of `items` are ignored.
+ */
+export function itemCategoryChanges(
+  items: ReceiptExtraction['items'],
+  categories: readonly string[]
+): ItemCategoryUpdate[] {
+  const changes: ItemCategoryUpdate[] = [];
+  items.forEach((item, index) => {
+    const category = categories[index];
+    if (category !== undefined && category !== item.category) changes.push({ index, category });
+  });
+  return changes;
+}
+
 export type ReceiptEditOutcome =
   | { kind: 'invalid'; title: string; message: string }
   | { kind: 'unchanged' }
-  | { kind: 'update'; updates: { merchant?: string; total?: number } };
+  | {
+      kind: 'update';
+      updates: { merchant?: string; total?: number; items?: ItemCategoryUpdate[] };
+    };
 
 /**
  * Validates the user's edits on the result card and works out the minimal
- * PATCH body: only fields that actually changed are sent.
+ * PATCH body: only fields that actually changed are sent (and only the
+ * line items whose category changed).
  */
 export function resolveReceiptEdits(
-  original: Pick<ScanResult, 'merchant' | 'total'>,
+  original: Pick<ScanResult, 'merchant' | 'total'> & { items?: ReceiptExtraction['items'] },
   editedMerchant: string,
-  editedTotal: string
+  editedTotal: string,
+  editedCategories: readonly string[] = []
 ): ReceiptEditOutcome {
   const merchant = editedMerchant.trim();
   // Accepts what the card pre-fills ("₪1,234.50") as well as plain typing ("1234.5").
@@ -88,13 +132,15 @@ export function resolveReceiptEdits(
 
   const merchantChanged = merchant !== original.merchant;
   const totalChanged = totalNumber !== original.total;
-  if (!merchantChanged && !totalChanged) return { kind: 'unchanged' };
+  const categoryChanges = itemCategoryChanges(original.items ?? [], editedCategories);
+  if (!merchantChanged && !totalChanged && categoryChanges.length === 0) return { kind: 'unchanged' };
 
   return {
     kind: 'update',
     updates: {
       ...(merchantChanged && { merchant }),
       ...(totalChanged && { total: totalNumber }),
+      ...(categoryChanges.length > 0 && { items: categoryChanges }),
     },
   };
 }

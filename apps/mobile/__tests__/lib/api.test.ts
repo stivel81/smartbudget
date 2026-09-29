@@ -11,6 +11,7 @@ import {
   verifySignup,
   resendSignupCode,
   updateReceipt,
+  updateItemCategories,
   getReceiptImageUrl,
   deleteReceipt,
   getBudgets,
@@ -401,6 +402,39 @@ describe('lib/api', () => {
         body: { merchant: 'Shop', total: 12.5 },
         okBody: { receipt: { id: 'r1' } },
         expected: { receipt: { id: 'r1' } },
+        fallback: 'Failed to update receipt',
+      },
+      {
+        name: 'updateReceipt (items + date)',
+        call: () => updateReceipt('r1', { date: '17/08/2026', items: [{ index: 0, category: 'Dining' }] }, 'tok'),
+        url: '/api/v1/receipts/r1',
+        method: 'PATCH',
+        body: { date: '17/08/2026', items: [{ index: 0, category: 'Dining' }] },
+        okBody: { receipt: { id: 'r1' } },
+        expected: { receipt: { id: 'r1' } },
+        fallback: 'Failed to update receipt',
+      },
+      {
+        name: 'updateItemCategories',
+        call: () =>
+          updateItemCategories(
+            'r2',
+            [
+              { index: 0, category: 'Dining' },
+              { index: 2, category: 'Health' },
+            ],
+            'tok'
+          ),
+        url: '/api/v1/receipts/r2',
+        method: 'PATCH',
+        body: {
+          items: [
+            { index: 0, category: 'Dining' },
+            { index: 2, category: 'Health' },
+          ],
+        },
+        okBody: { receipt: { id: 'r1', raw_response: { items: [] } } },
+        expected: { receipt: { id: 'r1', raw_response: { items: [] } } },
         fallback: 'Failed to update receipt',
       },
       {

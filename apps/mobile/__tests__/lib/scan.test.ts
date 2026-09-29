@@ -1,6 +1,10 @@
 import {
+  JPEG_QUALITY,
   MAX_IMAGE_DIMENSION,
+  PICKER_QUALITY,
   UNCATEGORIZED,
+  itemCategoryChanges,
+  withCategories,
   categoryIconFor,
   resizeTargetFor,
   resolveReceiptEdits,
@@ -82,9 +86,97 @@ describe('lib/scan', () => {
         id: 'r9',
         merchant: 'Café Aroma',
         category: 'Dining',
-        date: '2026-09-01',
+        date: '01/09/2026',
         total: 32.5,
+        items: [{ name: 'Latte', amount: 32.5, category: 'Dining' }],
       });
+    });
+
+    it('shows a normalized ISO date day-first (the Israeli receipt that was misfiled)', () => {
+      const receipt: Receipt = {
+        id: 'r1',
+        user_id: 'u1',
+        created_at: '2026-09-29T10:00:00Z',
+        image_path: null,
+        raw_response: { merchant: 'טיטניום בע"מ', total: 350, date: '2026-08-17', items: [] },
+      };
+      expect(toScanResult(receipt).date).toBe('17/08/2026');
+    });
+
+    it('falls back to the upload day when the receipt has no date', () => {
+      const created = new Date(2026, 8, 29, 10, 0, 0);
+      const receipt: Receipt = {
+        id: 'r1',
+        user_id: 'u1',
+        created_at: created.toISOString(),
+        image_path: null,
+        raw_response: { merchant: 'M', total: 1, date: null, items: [] },
+      };
+      expect(toScanResult(receipt).date).toBe('29/09/2026');
+    });
+  });
+
+  describe('upload image quality', () => {
+    it('lets the picker hand over the original (no double JPEG compression)', () => {
+      expect(PICKER_QUALITY).toBe(1);
+    });
+
+    it('encodes once at a high JPEG quality for OCR of small print', () => {
+      expect(JPEG_QUALITY).toBeGreaterThanOrEqual(0.85);
+      expect(JPEG_QUALITY).toBeLessThanOrEqual(1);
+      expect(JPEG_QUALITY).toBe(0.9);
+    });
+  });
+
+  describe('withCategories', () => {
+    const items = [
+      { name: 'Milk', amount: 10, category: 'Groceries' },
+      { name: 'Coffee', amount: 12, category: 'Groceries' },
+    ];
+
+    it('replaces each line category with the edited one', () => {
+      expect(withCategories(items, ['Groceries', 'Dining'])).toEqual([
+        { name: 'Milk', amount: 10, category: 'Groceries' },
+        { name: 'Coffee', amount: 12, category: 'Dining' },
+      ]);
+    });
+
+    it('keeps the original category where no edit is given', () => {
+      expect(withCategories(items, [])).toEqual(items);
+      expect(withCategories(items, ['Health'])[1].category).toBe('Groceries');
+    });
+
+    it('does not mutate the input', () => {
+      withCategories(items, ['Health', 'Health']);
+      expect(items[0].category).toBe('Groceries');
+    });
+  });
+
+  describe('itemCategoryChanges', () => {
+    const items = [
+      { name: 'Milk', amount: 10, category: 'Groceries' },
+      { name: 'Coffee', amount: 12, category: 'Groceries' },
+      { name: 'Bus', amount: 8, category: 'Other' },
+    ];
+
+    it('returns nothing when no category changed', () => {
+      expect(itemCategoryChanges(items, ['Groceries', 'Groceries', 'Other'])).toEqual([]);
+      expect(itemCategoryChanges(items, [])).toEqual([]);
+    });
+
+    it('returns only the changed lines, in index order', () => {
+      expect(itemCategoryChanges(items, ['Groceries', 'Dining', 'Transport'])).toEqual([
+        { index: 1, category: 'Dining' },
+        { index: 2, category: 'Transport' },
+      ]);
+    });
+
+    it('ignores edits past the last item', () => {
+      expect(itemCategoryChanges(items, ['Groceries', 'Groceries', 'Other', 'Health'])).toEqual([]);
+    });
+
+    it('handles a receipt with no items', () => {
+      expect(itemCategoryChanges([], ['Dining'])).toEqual([]);
     });
   });
 
@@ -176,5 +268,51 @@ describe('resolveReceiptEdits with formatted totals', () => {
       kind: 'update',
       updates: { total: 1300.25 },
     });
+  });
+});
+
+describe('resolveReceiptEdits with category changes', () => {
+  const original = {
+    merchant: 'Rami Levy',
+    total: 22,
+    items: [
+      { name: 'Milk', amount: 10, category: 'Groceries' },
+      { name: 'Coffee', amount: 12, category: 'Groceries' },
+    ],
+  };
+
+  it('is unchanged when categories match the originals', () => {
+    expect(resolveReceiptEdits(original, 'Rami Levy', '22', ['Groceries', 'Groceries'])).toEqual({
+      kind: 'unchanged',
+    });
+  });
+
+  it('sends only the changed item categories', () => {
+    expect(resolveReceiptEdits(original, 'Rami Levy', '22', ['Groceries', 'Dining'])).toEqual({
+      kind: 'update',
+      updates: { items: [{ index: 1, category: 'Dining' }] },
+    });
+  });
+
+  it('combines category changes with merchant and total edits', () => {
+    expect(resolveReceiptEdits(original, 'Aroma', '30', ['Dining', 'Dining'])).toEqual({
+      kind: 'update',
+      updates: {
+        merchant: 'Aroma',
+        total: 30,
+        items: [
+          { index: 0, category: 'Dining' },
+          { index: 1, category: 'Dining' },
+        ],
+      },
+    });
+  });
+
+  it('still validates merchant/total before considering categories', () => {
+    expect(resolveReceiptEdits(original, '', '22', ['Dining', 'Dining']).kind).toBe('invalid');
+  });
+
+  it('treats a result without items as having no category changes', () => {
+    expect(resolveReceiptEdits({ merchant: 'M', total: 1 }, 'M', '1', ['Dining'])).toEqual({ kind: 'unchanged' });
   });
 });

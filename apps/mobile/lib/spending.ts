@@ -49,8 +49,26 @@ export function parseReceiptDate(value: unknown): Date | null {
  * (as extracted by the OCR step) when it is valid, otherwise the moment the
  * receipt was uploaded.
  */
-export function receiptSpendDate(receipt: Receipt): Date {
+export function receiptSpendDate(receipt: Pick<Receipt, 'raw_response' | 'created_at'>): Date {
   return parseReceiptDate(receipt.raw_response?.date) ?? new Date(receipt.created_at);
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** Israeli display order "DD/MM/YYYY" (local calendar day); "—" for an invalid Date. */
+export function formatDayMonthYear(date: Date): string {
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+/**
+ * How a receipt's date is shown everywhere in the app: its spend date
+ * (receiptSpendDate — the printed date, else the upload time) as DD/MM/YYYY.
+ */
+export function formatReceiptDate(receipt: Pick<Receipt, 'raw_response' | 'created_at'>): string {
+  return formatDayMonthYear(receiptSpendDate(receipt));
 }
 
 /** True when `date` falls in the same local calendar month and year as `now`. */

@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -17,13 +17,18 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { AuthContext } from '../lib/auth';
 import type { MainTabParamList } from '../lib/navigation';
 import { initialsFor } from '../lib/profile';
-import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget } from '../lib/api';
+import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget, updateItemCategories } from '../lib/api';
 import { textDirectionStyle } from '../lib/rtl';
-import { COLORS, CATEGORY_META, RADIUS, budgetBarColor } from '../lib/theme';
+import { COLORS, RADIUS, budgetBarColor } from '../lib/theme';
+import { RECEIPT_CATEGORIES, categoryMeta } from '../lib/categories';
+import { errorMessage } from '../lib/errors';
+import CategoryPicker from '../components/CategoryPicker';
+import ReceiptItemsList from '../components/ReceiptItemsList';
 import {
   CategoryTotal,
   budgetUsagePct,
   budgetsByCategory as indexBudgetsByCategory,
+  formatReceiptDate,
   percentOf,
   receiptsForMonth,
   receiptsSince,
@@ -33,10 +38,6 @@ import {
 } from '../lib/spending';
 import { greetingFor } from '../lib/greeting';
 import { formatCurrency } from '../lib/currency';
-
-function categoryMeta(category: string) {
-  return CATEGORY_META[category] ?? CATEGORY_META.Other;
-}
 
 // Spec (Screen 3): 34px circle, light-grey (COLORS.background) bg, black initials — visible because
 // the header it sits on is white (COLORS.surface).
@@ -87,27 +88,63 @@ const ReceiptItem: React.FC<{ receipt: Receipt; onPress: () => void }> = ({ rece
       <View style={[styles.receiptIconContainer, { backgroundColor: meta.backgroundColor }]}>
         <MaterialCommunityIcons name={meta.icon as any} size={20} color={meta.color} />
       </View>
-      <View style={styles.receiptInfo}>
-        <Text style={[styles.receiptMerchant, textDirectionStyle(receipt.raw_response.merchant)]}>
+      <View style={styles.receiptInfo} testID={`receipt-info-${receipt.id}`}>
+        <Text
+          style={[styles.receiptMerchant, textDirectionStyle(receipt.raw_response.merchant)]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          testID={`receipt-merchant-${receipt.id}`}
+        >
           {receipt.raw_response.merchant}
         </Text>
-        <Text style={styles.receiptDate}>{receipt.raw_response.date}</Text>
+        <Text style={styles.receiptDate} testID={`receipt-date-${receipt.id}`}>
+          {formatReceiptDate(receipt)}
+        </Text>
       </View>
-      <Text style={styles.receiptAmount}>
+      <Text style={styles.receiptAmount} testID={`receipt-amount-${receipt.id}`}>
         {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
       </Text>
     </TouchableOpacity>
   );
 };
 
-const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClose: () => void }> = ({
-  receipt,
-  accessToken,
-  onClose,
-}) => {
+const ReceiptImageModal: React.FC<{
+  receipt: Receipt;
+  accessToken: string;
+  onClose: () => void;
+  onReceiptUpdated: (receipt: Receipt) => void;
+}> = ({ receipt, accessToken, onClose, onReceiptUpdated }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  const [savingIndex, setSavingIndex] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    []
+  );
+
+  const items = receipt.raw_response.items ?? [];
+
+  // Saves immediately; the Dashboard swaps in the server's copy, so the
+  // totals and category cards re-derive from it.
+  const changeCategory = async (index: number, category: string) => {
+    if (items[index]?.category === category) return;
+    setSavingIndex(index);
+    setSaveError('');
+    try {
+      const { receipt: updated } = await updateItemCategories(receipt.id, [{ index, category }], accessToken);
+      if (mounted.current) onReceiptUpdated(updated);
+    } catch (err: unknown) {
+      if (mounted.current) setSaveError(errorMessage(err, 'Could not change the category. Please try again.'));
+    } finally {
+      if (mounted.current) setSavingIndex(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -136,12 +173,17 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
       <View style={styles.modalOverlay}>
         <View style={styles.modalCard}>
           <View style={styles.modalHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.modalTitle, textDirectionStyle(receipt.raw_response.merchant)]}>
+            <View style={styles.modalHeaderText} testID="receipt-modal-header-text">
+              <Text
+                style={[styles.modalTitle, textDirectionStyle(receipt.raw_response.merchant)]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+                testID="receipt-modal-title"
+              >
                 {receipt.raw_response.merchant}
               </Text>
               <Text style={styles.modalSubtitle}>
-                {receipt.raw_response.date} · {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
+                {formatReceiptDate(receipt)} · {formatCurrency(receipt.raw_response.total, { decimals: 2 })}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} testID="receipt-modal-close">
@@ -149,15 +191,44 @@ const ReceiptImageModal: React.FC<{ receipt: Receipt; accessToken: string; onClo
             </TouchableOpacity>
           </View>
 
-          <View style={styles.modalImageContainer}>
-            {loading && <ActivityIndicator color={COLORS.button} />}
-            {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
-            {!loading && imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.modalImage} resizeMode="contain" />
-            ) : null}
-          </View>
+          <ScrollView style={styles.modalBody} testID="receipt-modal-body">
+            {items.length > 0 && (
+              <View style={styles.modalItems}>
+                <ReceiptItemsList
+                  items={items}
+                  onPressCategory={setPickerIndex}
+                  savingIndex={savingIndex}
+                  testIDPrefix="receipt-modal-item"
+                />
+                {saveError ? (
+                  <Text style={styles.errorText} testID="receipt-modal-save-error">
+                    {saveError}
+                  </Text>
+                ) : null}
+              </View>
+            )}
+
+            <View style={styles.modalImageContainer}>
+              {loading && <ActivityIndicator color={COLORS.button} />}
+              {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {!loading && imageUrl ? (
+                <Image source={{ uri: imageUrl }} style={styles.modalImage} resizeMode="contain" />
+              ) : null}
+            </View>
+          </ScrollView>
         </View>
       </View>
+
+      {pickerIndex !== null && items[pickerIndex] ? (
+        <CategoryPicker
+          visible
+          categories={RECEIPT_CATEGORIES}
+          selected={items[pickerIndex].category}
+          subtitle={items[pickerIndex].name}
+          onSelect={(category) => changeCategory(pickerIndex, category)}
+          onClose={() => setPickerIndex(null)}
+        />
+      ) : null}
     </Modal>
   );
 };
@@ -169,7 +240,13 @@ export default function DashboardScreen(): React.ReactElement {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  // Derived from `receipts` so a saved category change shows in the open modal too.
+  const selectedReceipt = receipts.find((r) => r.id === selectedReceiptId) ?? null;
+
+  const replaceReceipt = useCallback((updated: Receipt) => {
+    setReceipts((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -333,7 +410,7 @@ export default function DashboardScreen(): React.ReactElement {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Recent Receipts</Text>
             {receipts.slice(0, 5).map((receipt) => (
-              <ReceiptItem key={receipt.id} receipt={receipt} onPress={() => setSelectedReceipt(receipt)} />
+              <ReceiptItem key={receipt.id} receipt={receipt} onPress={() => setSelectedReceiptId(receipt.id)} />
             ))}
           </View>
         )}
@@ -343,7 +420,8 @@ export default function DashboardScreen(): React.ReactElement {
         <ReceiptImageModal
           receipt={selectedReceipt}
           accessToken={auth.accessToken}
-          onClose={() => setSelectedReceipt(null)}
+          onClose={() => setSelectedReceiptId(null)}
+          onReceiptUpdated={replaceReceipt}
         />
       )}
     </SafeAreaView>
@@ -571,8 +649,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+  // flex 1 + minWidth 0: takes the leftover width and may shrink below its
+  // text, so a long (often right-aligned Hebrew) merchant ellipsizes instead
+  // of running into the amount.
   receiptInfo: {
     flex: 1,
+    minWidth: 0,
   },
   receiptMerchant: {
     fontSize: 14,
@@ -585,6 +667,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   receiptAmount: {
+    flexShrink: 0,
+    marginLeft: 12,
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.textPrimary,
@@ -607,6 +691,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
+  modalHeaderText: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
   modalTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -616,6 +705,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  modalBody: {
+    flexGrow: 0,
+  },
+  modalItems: {
+    marginBottom: 12,
   },
   modalImageContainer: {
     minHeight: 200,

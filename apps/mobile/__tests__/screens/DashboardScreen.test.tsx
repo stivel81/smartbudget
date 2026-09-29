@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet } from 'react-native';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react-native';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react-native';
 import { budgetBarColor, COLORS } from '../../lib/theme';
 
 const mockNavigate = jest.fn();
@@ -20,10 +20,12 @@ jest.mock('@react-navigation/native', () => {
 const mockGetReceipts = jest.fn();
 const mockGetReceiptImageUrl = jest.fn();
 const mockGetBudgets = jest.fn();
+const mockUpdateItemCategories = jest.fn();
 jest.mock('../../lib/api', () => ({
   getReceipts: (...args: unknown[]) => mockGetReceipts(...args),
   getReceiptImageUrl: (...args: unknown[]) => mockGetReceiptImageUrl(...args),
   getBudgets: (...args: unknown[]) => mockGetBudgets(...args),
+  updateItemCategories: (...args: unknown[]) => mockUpdateItemCategories(...args),
 }));
 
 import DashboardScreen from '../../screens/DashboardScreen';
@@ -822,7 +824,7 @@ describe('DashboardScreen', () => {
 
       fireEvent.press(await screen.findByTestId('receipt-item-r1'));
 
-      expect(await screen.findByText('2026-01-19 · ₪2,847.30')).toBeTruthy();
+      expect(await screen.findByText('19/01/2026 · ₪2,847.30')).toBeTruthy();
       // Let the image URL request settle inside the test.
       expect(mockGetReceiptImageUrl).toHaveBeenCalledWith('r1', 'test-token');
       await waitFor(() => expect(screen.UNSAFE_getByType(Image).props.source).toEqual({ uri: 'https://example.com/r1.jpg' }));
@@ -926,4 +928,329 @@ describe('DashboardScreen', () => {
       expect(StyleSheet.flatten(screen.getByTestId('category-card-Groceries').props.style).width).toBe('48%');
     });
   });
+
+  describe('receipt dates (Israeli receipts, day-first display)', () => {
+    // "Now" is late September; the scanned receipt is from August.
+    const SEPT_29 = new Date(2026, 8, 29, 9, 0, 0);
+    const TITANIUM = {
+      id: 'tit',
+      user_id: 'u1',
+      created_at: new Date(2026, 8, 29, 8, 0, 0).toISOString(), // scanned today
+      image_path: null,
+      raw_response: {
+        merchant: 'טיטניום בע"מ',
+        total: 350,
+        date: '2026-08-17', // ISO, as the backend now stores it
+        items: [{ name: 'כללי', amount: 350, category: 'Other' }],
+      },
+    };
+
+    beforeEach(() => {
+      jest.setSystemTime(SEPT_29);
+    });
+
+    it('does not count an August-dated receipt in September (month, week, count, categories)', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [TITANIUM] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await screen.findByTestId('receipt-item-tit');
+
+      expect(textOf('hero-spent')).toBe('₪0');
+      expect(textOf('hero-week')).toBe('₪0');
+      expect(textOf('hero-count')).toBe('0');
+      expect(screen.queryByTestId('category-grid')).toBeNull();
+      // Still listed under Recent Receipts, dated as printed.
+      expect(textOf('receipt-date-tit')).toBe('17/08/2026');
+    });
+
+    it('counts it once the Dashboard is viewed in August', async () => {
+      jest.setSystemTime(new Date(2026, 7, 20, 9, 0, 0));
+      mockGetReceipts.mockResolvedValue({ receipts: [TITANIUM] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await screen.findByTestId('receipt-item-tit');
+
+      expect(textOf('hero-spent')).toBe('₪350');
+      expect(textOf('hero-week')).toBe('₪350');
+      expect(textOf('hero-count')).toBe('1');
+    });
+
+    it('a legacy un-normalized "17/08/2026" still falls back to the upload day (why the backfill exists)', async () => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [{ ...TITANIUM, raw_response: { ...TITANIUM.raw_response, date: '17/08/2026' } }],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await screen.findByTestId('receipt-item-tit');
+
+      expect(textOf('hero-count')).toBe('1');
+      expect(textOf('receipt-date-tit')).toBe('29/09/2026');
+    });
+
+    it('shows the upload day for a receipt with no date', async () => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [{ ...TITANIUM, raw_response: { ...TITANIUM.raw_response, date: null } }],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+      renderDashboard();
+      await screen.findByTestId('receipt-item-tit');
+
+      expect(textOf('receipt-date-tit')).toBe('29/09/2026');
+      expect(textOf('hero-spent')).toBe('₪350');
+    });
+
+    it('shows the day-first date in the receipt modal subtitle', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [TITANIUM] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/t.jpg');
+
+      renderDashboard();
+      fireEvent.press(await screen.findByTestId('receipt-item-tit'));
+
+      expect(await screen.findByText('17/08/2026 · ₪350.00')).toBeTruthy();
+      await waitFor(() => expect(screen.UNSAFE_getByType(Image).props.source).toEqual({ uri: 'https://example.com/t.jpg' }));
+    });
+  });
+
+  describe('Recent Receipts row layout (merchant never collides with the amount)', () => {
+    const style = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style);
+
+    async function renderRow(merchant: string) {
+      mockGetReceipts.mockResolvedValue({ receipts: [receipt('r1', { date: '2026-01-19', total: 350, merchant })] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      renderDashboard();
+      await screen.findByTestId('receipt-item-r1');
+    }
+
+    it('gives the merchant column the leftover width and lets it shrink', async () => {
+      await renderRow('טיטניום בע"מ');
+      expect(style('receipt-info-r1')).toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+    });
+
+    it('keeps the merchant on one ellipsized line, right-aligned for Hebrew', async () => {
+      await renderRow('טיטניום בע"מ');
+      const merchant = screen.getByTestId('receipt-merchant-r1');
+      expect(merchant.props.numberOfLines).toBe(1);
+      expect(merchant.props.ellipsizeMode).toBe('tail');
+      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' }));
+    });
+
+    it('keeps a fixed gap before the amount, which never shrinks', async () => {
+      await renderRow('טיטניום בע"מ');
+      const amount = style('receipt-amount-r1');
+      expect(amount.marginLeft).toBeGreaterThanOrEqual(8);
+      expect(amount.flexShrink).toBe(0);
+      expect(textOf('receipt-amount-r1')).toBe('₪350.00');
+    });
+
+    it('left-aligns a Latin merchant with the same layout', async () => {
+      await renderRow('Rami Levy');
+      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'left' }));
+      expect(style('receipt-info-r1').minWidth).toBe(0);
+    });
+  });
+
+  describe('receipt modal: change a line item category', () => {
+    const MODAL_RECEIPT = {
+      id: 'r1',
+      user_id: 'u1',
+      created_at: '2026-01-02T00:00:00Z',
+      image_path: null,
+      raw_response: {
+        merchant: 'טיטניום בע"מ',
+        total: 350,
+        date: '2026-01-19',
+        items: [
+          { name: 'כללי', amount: 300, category: 'Other' },
+          { name: 'Coffee', amount: 50, category: 'Dining' },
+        ],
+      },
+    };
+
+    function withCategory(index: number, category: string) {
+      const items = MODAL_RECEIPT.raw_response.items.map((item, i) => (i === index ? { ...item, category } : item));
+      return { ...MODAL_RECEIPT, raw_response: { ...MODAL_RECEIPT.raw_response, items } };
+    }
+
+    async function openModal() {
+      mockGetReceipts.mockResolvedValue({ receipts: [MODAL_RECEIPT] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r1.jpg');
+      renderDashboard();
+      fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+      await screen.findByTestId('receipt-modal-close');
+      // Let the image request settle so later negative assertions are meaningful.
+      await waitFor(() => expect(screen.UNSAFE_getByType(Image)).toBeTruthy());
+    }
+
+    function chipLabel(index: number) {
+      return screen.getByTestId(`receipt-modal-item-category-${index}`).props.accessibilityLabel;
+    }
+
+    it('lists the line items with name, amount and category chip', async () => {
+      await openModal();
+      expect(textOf('receipt-modal-item-name-0')).toBe('כללי');
+      expect(textOf('receipt-modal-item-amount-0')).toBe('₪300.00');
+      expect(chipLabel(0)).toBe('Category for כללי: Other. Change category');
+      expect(chipLabel(1)).toBe('Category for Coffee: Dining. Change category');
+    });
+
+    it('opens the picker with the current category checked', async () => {
+      await openModal();
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      expect(screen.getByTestId('category-picker')).toBeTruthy();
+      expect(screen.getByTestId('category-option-check-Other')).toBeTruthy();
+      expect(screen.queryByTestId('category-option-check-Dining')).toBeNull();
+      expect(textOf('category-picker-subtitle')).toBe('כללי');
+    });
+
+    it('saves the change immediately and refreshes totals and category cards', async () => {
+      await openModal();
+      expect(screen.getByTestId('category-card-Other')).toBeTruthy();
+      mockUpdateItemCategories.mockResolvedValue({ receipt: withCategory(0, 'Groceries') });
+
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Groceries'));
+
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+      expect(mockUpdateItemCategories).toHaveBeenCalledWith('r1', [{ index: 0, category: 'Groceries' }], 'test-token');
+
+      await waitFor(() => expect(chipLabel(0)).toBe('Category for כללי: Groceries. Change category'));
+      expect(screen.getByTestId('category-card-Groceries')).toBeTruthy();
+      expect(screen.queryByTestId('category-card-Other')).toBeNull();
+      expect(within(screen.getByTestId('category-card-Groceries')).getByText('₪300')).toBeTruthy();
+      expect(textOf('hero-spent')).toBe('₪350'); // total unchanged
+      // Updated from the PATCH response — no refetch needed.
+      expect(mockGetReceipts).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows "Saving…" and locks the chips while the change is in flight', async () => {
+      await openModal();
+      let resolve!: (v: unknown) => void;
+      mockUpdateItemCategories.mockReturnValue(new Promise((r) => (resolve = r)));
+
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-1'));
+      fireEvent.press(screen.getByTestId('category-option-Health'));
+
+      expect(within(screen.getByTestId('receipt-modal-item-category-1')).getByText('Saving…')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+
+      await act(async () => resolve({ receipt: withCategory(1, 'Health') }));
+      await waitFor(() => expect(chipLabel(1)).toBe('Category for Coffee: Health. Change category'));
+      expect(screen.queryByText('Saving…')).toBeNull();
+    });
+
+    it('shows an error and keeps the old category when saving fails', async () => {
+      await openModal();
+      mockUpdateItemCategories.mockRejectedValue({ message: 'Each item category must be one of: …' });
+
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Dining'));
+
+      expect(await screen.findByText('Each item category must be one of: …')).toBeTruthy();
+      expect(chipLabel(0)).toBe('Category for כללי: Other. Change category');
+      expect(screen.getByTestId('category-card-Other')).toBeTruthy();
+    });
+
+    it('falls back to a generic error message', async () => {
+      await openModal();
+      mockUpdateItemCategories.mockRejectedValue({});
+
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Dining'));
+
+      expect(await screen.findByText('Could not change the category. Please try again.')).toBeTruthy();
+    });
+
+    it('clears a previous error on the next attempt', async () => {
+      await openModal();
+      mockUpdateItemCategories.mockRejectedValueOnce({ message: 'Network down' });
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Dining'));
+      await screen.findByText('Network down');
+
+      mockUpdateItemCategories.mockResolvedValueOnce({ receipt: withCategory(0, 'Dining') });
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Dining'));
+
+      await waitFor(() => expect(chipLabel(0)).toBe('Category for כללי: Dining. Change category'));
+      expect(screen.queryByText('Network down')).toBeNull();
+    });
+
+    it('does not call the API when the current category is picked again', async () => {
+      await openModal();
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Other'));
+
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+      await act(async () => {}); // flush any pending work before the negative assertion
+      expect(mockUpdateItemCategories).not.toHaveBeenCalled();
+      expect(screen.queryByText('Saving…')).toBeNull();
+    });
+
+    it('ignores a save that completes after the modal was closed (no state update on unmount)', async () => {
+      await openModal();
+      let resolve!: (v: unknown) => void;
+      mockUpdateItemCategories.mockReturnValue(new Promise((r) => (resolve = r)));
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Health'));
+      fireEvent.press(screen.getByTestId('receipt-modal-close'));
+      await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+
+      await act(async () => resolve({ receipt: withCategory(0, 'Health') }));
+
+      // The closed modal dropped the result; the Dashboard still shows the old data.
+      expect(screen.getByTestId('category-card-Other')).toBeTruthy();
+      expect(screen.queryByTestId('category-card-Health')).toBeNull();
+    });
+
+    it('ignores a failure that arrives after the modal was closed', async () => {
+      await openModal();
+      let reject!: (e: unknown) => void;
+      mockUpdateItemCategories.mockReturnValue(new Promise((_r, j) => (reject = j)));
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-option-Health'));
+      fireEvent.press(screen.getByTestId('receipt-modal-close'));
+      await waitFor(() => expect(screen.queryByTestId('receipt-modal-close')).toBeNull());
+
+      await act(async () => reject({ message: 'late failure' }));
+      expect(screen.queryByText('late failure')).toBeNull();
+    });
+
+    it('closing the picker without choosing saves nothing', async () => {
+      await openModal();
+      fireEvent.press(screen.getByTestId('receipt-modal-item-category-0'));
+      fireEvent.press(screen.getByTestId('category-picker-close'));
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+      await act(async () => {});
+      expect(mockUpdateItemCategories).not.toHaveBeenCalled();
+    });
+
+    it('shows no item list for a receipt without items', async () => {
+      mockGetReceipts.mockResolvedValue({ receipts: [receipt('r9', { date: '2026-01-19', total: 5 })] });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r9.jpg');
+      renderDashboard();
+      fireEvent.press(await screen.findByTestId('receipt-item-r9'));
+      await waitFor(() => expect(screen.UNSAFE_getByType(Image)).toBeTruthy());
+      expect(screen.queryByTestId('receipt-modal-items')).toBeNull();
+    });
+
+    it('lays the modal header out so a long merchant never runs into the close button', async () => {
+      await openModal();
+      expect(StyleSheet.flatten(screen.getByTestId('receipt-modal-header-text').props.style)).toEqual(
+        expect.objectContaining({ flex: 1, minWidth: 0, marginRight: 12 })
+      );
+      expect(screen.getByTestId('receipt-modal-title').props.numberOfLines).toBe(2);
+      expect(StyleSheet.flatten(screen.getByTestId('receipt-modal-title').props.style)).toEqual(
+        expect.objectContaining({ textAlign: 'right' })
+      );
+    });
+  });
 });
+

@@ -25,7 +25,7 @@ import {
   sumSpent,
   withSpend,
 } from '../lib/spending';
-import { formatCurrency } from '../lib/currency';
+import { CURRENCY_SYMBOL, formatCurrency } from '../lib/currency';
 
 function categoryMeta(category: string) {
   return CATEGORY_META[category] ?? CATEGORY_META.Other;
@@ -322,7 +322,7 @@ export default function BudgetScreen(): React.ReactElement {
               ))}
             </View>
 
-            <Text style={styles.modalLabel}>Monthly limit (₪)</Text>
+            <Text style={styles.modalLabel}>Monthly limit ({CURRENCY_SYMBOL})</Text>
             <TextInput
               style={styles.modalInput}
               value={modalLimit}

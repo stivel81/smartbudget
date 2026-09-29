@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert, Animated, StyleSheet } from 'react-native';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator } from 'expo-image-manipulator';
 import { setStatusBarStyle } from 'expo-status-bar';
@@ -148,6 +148,13 @@ async function scanFromGallery() {
 function inputStyle(testID: string) {
   return StyleSheet.flatten(screen.getByTestId(testID).props.style);
 }
+
+// Tests that wait for the result card's 300 ms slide-out step fake timers
+// alongside the looping scan-line animation and take ~4 s each even on an
+// idle machine (true at HEAD before the line-item list was added too). Under
+// load (Metro + Simulator + a parallel coverage run) that crossed Jest's 5 s
+// default, so this suite gets more headroom.
+jest.setTimeout(15_000);
 
 let alertSpy: jest.SpyInstance;
 
@@ -314,7 +321,7 @@ describe('ScanScreen — permissions and picker', () => {
 
     fireEvent.press(screen.getByTestId('scan-capture-button'));
 
-    await waitFor(() => expect(picker.launchCameraAsync).toHaveBeenCalledWith({ quality: 0.7 }));
+    await waitFor(() => expect(picker.launchCameraAsync).toHaveBeenCalledWith({ quality: 1 }));
     expect(manipulate).not.toHaveBeenCalled();
     expect(mockScanReceipt).not.toHaveBeenCalled();
     expect(alertSpy).not.toHaveBeenCalled();
@@ -327,7 +334,7 @@ describe('ScanScreen — permissions and picker', () => {
     fireEvent.press(screen.getByTestId('scan-gallery-button'));
 
     await waitFor(() =>
-      expect(picker.launchImageLibraryAsync).toHaveBeenCalledWith({ mediaTypes: ['images'], quality: 0.7 })
+      expect(picker.launchImageLibraryAsync).toHaveBeenCalledWith({ mediaTypes: ['images'], quality: 1 })
     );
     expect(manipulate).not.toHaveBeenCalled();
     expect(mockScanReceipt).not.toHaveBeenCalled();
@@ -352,17 +359,19 @@ describe('ScanScreen — scanning', () => {
     await screen.findByTestId('scan-result-card');
 
     expect(manipulate).toHaveBeenCalledWith('file:///receipt.jpg');
-    expect(mockImage.saveAsync).toHaveBeenCalledWith({ format: 'jpeg', compress: 0.7, base64: true });
+    // One JPEG encode, at 0.9 (the picker hands over the original, quality 1).
+    expect(picker.launchCameraAsync).toHaveBeenCalledWith({ quality: 1 });
+    expect(mockImage.saveAsync).toHaveBeenCalledWith({ format: 'jpeg', compress: 0.9, base64: true });
     expect(mockContext.release).toHaveBeenCalled();
     expect(mockImage.release).toHaveBeenCalled();
     expect(mockScanReceipt).toHaveBeenCalledWith('base64data', 'image/jpeg', 'test-token');
 
     expect(screen.getByText('AI Extracted')).toBeTruthy();
     expect(screen.getByTestId('icon-creation')).toBeTruthy(); // sparkles
-    expect(screen.getByTestId('icon-cart')).toBeTruthy(); // Groceries category icon
+    expect(screen.getAllByTestId('icon-cart').length).toBeGreaterThan(0); // Groceries category icon
     expect(screen.getByTestId('scan-merchant-input').props.value).toBe('Test Store');
-    expect(screen.getByText('Groceries')).toBeTruthy();
-    expect(screen.getByText('2026-09-01')).toBeTruthy();
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Groceries');
+    expect(screen.getByTestId('scan-date').props.children).toBe('01/09/2026'); // Israeli day-first display
     expect(screen.getByTestId('scan-total-input').props.value).toBe('₪100.00');
     expect(screen.getByText('Save Receipt')).toBeTruthy();
   });
@@ -781,5 +790,229 @@ describe('ScanScreen — total formatting (formatCurrency)', () => {
 
     expect(alertSpy).toHaveBeenCalledWith('Invalid total', 'Total must be a positive number.');
     expect(mockUpdateReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScanScreen — receipt date display', () => {
+  it('shows an ISO receipt date day-first (DD/MM/YYYY)', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse({ date: '2026-08-17' }));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.getByTestId('scan-date').props.children).toBe('17/08/2026');
+  });
+
+  it('shows the upload day when Claude found no date', async () => {
+    const response = scanResponse({ date: null as unknown as string });
+    response.receipt.created_at = new Date(2026, 8, 29, 10, 0, 0).toISOString();
+    mockScanReceipt.mockResolvedValue(response);
+    renderScan();
+    await scanFromGallery();
+    expect(screen.getByTestId('scan-date').props.children).toBe('29/09/2026');
+  });
+});
+
+describe('ScanScreen — line items and category picker', () => {
+  const THREE = {
+    items: [
+      { name: 'Milk', amount: 10, category: 'Groceries' },
+      { name: 'Coffee', amount: 12, category: 'Groceries' },
+      { name: 'כללי', amount: 350, category: 'Other' },
+    ],
+  };
+
+  function chipText(index: number) {
+    return within(screen.getByTestId(`scan-item-category-${index}`)).getByText(/./).props.children;
+  }
+
+  it('lists each line item with name, amount and category chip', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    expect(screen.getByText('Items')).toBeTruthy();
+    expect(screen.getByTestId('scan-item-name-0').props.children).toBe('Milk');
+    expect(screen.getByTestId('scan-item-amount-1').props.children).toBe('₪12.00');
+    expect(screen.getByTestId('scan-item-name-2').props.children).toBe('כללי');
+    expect(chipText(0)).toBe('Groceries');
+    expect(chipText(2)).toBe('Other');
+  });
+
+  it('hides the items section when there are no line items', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse({ items: [] }));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.queryByText('Items')).toBeNull();
+    expect(screen.queryByTestId('scan-items')).toBeNull();
+  });
+
+  it('tapping a chip opens the picker with the current category checked and the item name', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+    expect(screen.queryByTestId('category-picker')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-2'));
+
+    expect(screen.getByTestId('category-picker')).toBeTruthy();
+    expect(screen.getByTestId('category-picker-subtitle').props.children).toBe('כללי');
+    expect(screen.getByTestId('category-option-check-Other')).toBeTruthy();
+    expect(screen.queryByTestId('category-option-check-Groceries')).toBeNull();
+    // The picker offers the backend's categories.
+    for (const c of ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other']) {
+      expect(screen.getByTestId(`category-option-${c}`)).toBeTruthy();
+    }
+  });
+
+  it('choosing a category updates the chip and the summary, closes the picker, and Save sends it', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-1'));
+    fireEvent.press(screen.getByTestId('category-option-Dining'));
+
+    expect(screen.queryByTestId('category-picker')).toBeNull();
+    expect(chipText(1)).toBe('Dining');
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Groceries, Dining, Other');
+    expect(mockUpdateReceipt).not.toHaveBeenCalled(); // nothing saved until Save
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() =>
+      expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] }, 'test-token')
+    );
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('changing the first item changes the summary icon', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-option-Health'));
+    fireEvent.press(screen.getByTestId('scan-item-category-1'));
+    fireEvent.press(screen.getByTestId('category-option-Health'));
+
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Health, Other');
+  });
+
+  it('sends category changes together with merchant edits', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'Aroma');
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-option-Dining'));
+    fireEvent.press(screen.getByTestId('scan-item-category-2'));
+    fireEvent.press(screen.getByTestId('category-option-Transport'));
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() =>
+      expect(mockUpdateReceipt).toHaveBeenCalledWith(
+        'r1',
+        {
+          merchant: 'Aroma',
+          items: [
+            { index: 0, category: 'Dining' },
+            { index: 2, category: 'Transport' },
+          ],
+        },
+        'test-token'
+      )
+    );
+  });
+
+  it('choosing a category and then changing it back sends nothing', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-option-Dining'));
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-option-Groceries'));
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(mockUpdateReceipt).not.toHaveBeenCalled();
+  });
+
+  it('closing the picker without choosing changes nothing', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-picker-close'));
+
+    expect(screen.queryByTestId('category-picker')).toBeNull();
+    expect(chipText(0)).toBe('Groceries');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    expect(mockUpdateReceipt).not.toHaveBeenCalled();
+  });
+
+  it('keeps the chosen categories when saving fails, so the user can retry', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    mockUpdateReceipt.mockRejectedValueOnce({ message: 'Server exploded' });
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-1'));
+    fireEvent.press(screen.getByTestId('category-option-Dining'));
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to save changes', 'Server exploded'));
+    expect(chipText(1)).toBe('Dining');
+
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() => expect(mockUpdateReceipt).toHaveBeenCalledTimes(2));
+    expect(mockUpdateReceipt).toHaveBeenLastCalledWith('r1', { items: [{ index: 1, category: 'Dining' }] }, 'test-token');
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('locks the chips while saving', async () => {
+    const pending = deferred<ReturnType<typeof scanResponse>>();
+    mockUpdateReceipt.mockReturnValue(pending.promise);
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+
+    fireEvent.changeText(screen.getByTestId('scan-total-input'), '55');
+    fireEvent.press(screen.getByTestId('scan-save-button'));
+    await waitFor(() => expect(screen.queryByText('Save Receipt')).toBeNull());
+
+    expect(screen.getByTestId('scan-item-category-0').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true })
+    );
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    expect(screen.queryByTestId('category-picker')).toBeNull();
+
+    await act(async () => {
+      pending.resolve(scanResponse());
+    });
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+  });
+
+  it('starts a new scan with fresh categories', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+    fireEvent.press(screen.getByTestId('scan-item-category-0'));
+    fireEvent.press(screen.getByTestId('category-option-Dining'));
+    fireEvent.press(screen.getByTestId('scan-close-button'));
+    await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+
+    await scanFromGallery();
+    expect(chipText(0)).toBe('Groceries');
+  });
+
+  it('keeps the item list scrollable inside the card', async () => {
+    mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+    renderScan();
+    await scanFromGallery();
+    expect(StyleSheet.flatten(screen.getByTestId('scan-items-scroll').props.style).maxHeight).toBeGreaterThan(0);
   });
 });
