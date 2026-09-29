@@ -488,3 +488,48 @@ describe('greetingFor', () => {
     });
   });
 });
+
+describe('categoryTotals / sortedCategoryTotals with custom categories', () => {
+  // What useCategories().canonicalName does once the user's list is loaded:
+  // known names (any casing) -> the category's name; unknown -> Other.
+  const known = ['Groceries', 'Dining', 'Transport', 'Entertainment', 'Health', 'Other', 'Pets', 'Gifts'];
+  const groupAs = (name: string) => known.find((k) => k.toLowerCase() === name.trim().toLowerCase()) ?? 'Other';
+
+  const receipts = [
+    receipt('r1', {
+      items: [
+        { name: 'Kibble', amount: 40, category: 'Pets' },
+        { name: 'Toy', amount: 10, category: 'pets' },
+        { name: 'Milk', amount: 8, category: 'Groceries' },
+      ],
+    }),
+    receipt('r2', {
+      items: [
+        { name: 'Card', amount: 15, category: 'Gifts' },
+        { name: 'Old thing', amount: 7, category: 'Deleted Category' },
+        { name: 'Misc', amount: 3, category: 'Other' },
+      ],
+    }),
+  ];
+
+  it('groups custom names under their own category (case-insensitively) and folds unknown names into Other', () => {
+    expect(categoryTotals(receipts, groupAs)).toEqual({ Pets: 50, Groceries: 8, Gifts: 15, Other: 10 });
+    expect(sortedCategoryTotals(receipts, groupAs)).toEqual([
+      { category: 'Pets', spent: 50 },
+      { category: 'Gifts', spent: 15 },
+      { category: 'Other', spent: 10 },
+      { category: 'Groceries', spent: 8 },
+    ]);
+  });
+
+  it('without a grouping keeps every name as stored (custom names are never lumped into Other)', () => {
+    expect(categoryTotals(receipts)).toEqual({
+      Pets: 40,
+      pets: 10,
+      Groceries: 8,
+      Gifts: 15,
+      'Deleted Category': 7,
+      Other: 3,
+    });
+  });
+});

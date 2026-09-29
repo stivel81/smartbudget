@@ -1,7 +1,7 @@
 // Pure helpers for the receipt scanner (ScanScreen). Kept free of React /
 // native modules so they can be unit-tested directly.
 import type { DuplicateReceipt, ItemCategoryUpdate, Receipt, ReceiptExtraction } from './api';
-import { CATEGORY_META } from './theme';
+import { categoryMeta, type CategoryMeta } from './categories';
 import { formatCurrency, parseAmountInput } from './currency';
 import { formatDayMonthYear, formatReceiptDate, parseReceiptDate } from './spending';
 
@@ -75,11 +75,18 @@ export function categoryRowLabel(items: ReceiptExtraction['items']): string {
   return commonCategory(items) ?? MIXED_CATEGORIES;
 }
 
-/** Icon for the Category row: the shared category's icon, or MIXED_CATEGORIES_ICON. */
-export function categoryRowIcon(items: ReceiptExtraction['items']): string {
+/**
+ * Icon for the Category row: the shared category's icon, or
+ * MIXED_CATEGORIES_ICON. `metaFor` resolves a name (pass
+ * useCategories().metaFor so custom categories get their own icon).
+ */
+export function categoryRowIcon(
+  items: ReceiptExtraction['items'],
+  metaFor: (category: string) => CategoryMeta = categoryMeta
+): string {
   const common = commonCategory(items);
   if (common === null && items.length > 0) return MIXED_CATEGORIES_ICON;
-  return categoryIconFor(common ?? UNCATEGORIZED);
+  return categoryIconFor(common ?? UNCATEGORIZED, metaFor);
 }
 
 export function toScanResult(receipt: Receipt): ScanResult {
@@ -95,12 +102,16 @@ export function toScanResult(receipt: Receipt): ScanResult {
 }
 
 /**
- * Icon for the Category row: the first listed category's icon from
- * CATEGORY_META, or the "Other" icon for unknown / uncategorized values.
+ * Icon for the Category row: the first listed category's icon (base
+ * CATEGORY_META by default, or whatever `metaFor` resolves), or the "Other"
+ * icon for unknown / uncategorized values.
  */
-export function categoryIconFor(categorySummary: string): string {
+export function categoryIconFor(
+  categorySummary: string,
+  metaFor: (category: string) => CategoryMeta = categoryMeta
+): string {
   const first = categorySummary.split(',')[0].trim();
-  return (CATEGORY_META[first] ?? CATEGORY_META.Other).icon;
+  return metaFor(first).icon;
 }
 
 /** `items` with each line's category replaced by `categories[i]` (when given). */

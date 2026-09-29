@@ -422,3 +422,18 @@ describe('lib/scan Category row helpers', () => {
     });
   });
 });
+
+describe('category row icon with custom categories', () => {
+  const metaFor = (name: string) =>
+    name === 'Pets' ? { icon: 'paw', color: '#DB2777', backgroundColor: '#DB27771F' } : CATEGORY_META.Other;
+  const line = (category: string) => ({ name: 'x', amount: 1, category });
+
+  it('uses the resolver for a shared custom category', () => {
+    expect(categoryRowIcon([line('Pets'), line('Pets')], metaFor)).toBe('paw');
+    expect(categoryIconFor('Pets, Dining', metaFor)).toBe('paw');
+  });
+
+  it('still shows the mixed icon when lines differ', () => {
+    expect(categoryRowIcon([line('Pets'), line('Dining')], metaFor)).toBe(MIXED_CATEGORIES_ICON);
+  });
+});

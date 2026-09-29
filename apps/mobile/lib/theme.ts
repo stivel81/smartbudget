@@ -83,6 +83,24 @@ export const CATEGORY_META: Record<string, { icon: string; backgroundColor: stri
   Other: { icon: 'dots-horizontal', backgroundColor: '#F3F4F6', color: '#6B7280' },
 };
 
+// Palette offered for custom (user-created) categories on the Manage
+// categories screen. Mid-saturation hues that read on white and keep enough
+// contrast when tinted (see categoryTint in lib/categories). The first entry
+// is the neutral used when a custom row has no (or an invalid) color.
+export const CUSTOM_CATEGORY_COLORS: readonly string[] = [
+  '#6B7280', // slate (neutral default)
+  '#0F6E56', // green
+  '#D97706', // amber
+  '#4F46E5', // indigo
+  '#DC2626', // red
+  '#DB2777', // pink
+  '#0891B2', // cyan
+  '#7C3AED', // violet
+];
+
+/** Color for a custom category with no usable color of its own. */
+export const CUSTOM_CATEGORY_DEFAULT_COLOR = CUSTOM_CATEGORY_COLORS[0];
+
 // Budget bar threshold logic per DESIGN_REFERENCE_V2.md Alert Thresholds:
 // Under 70% → green (success)
 // 70–89% → amber (warning)

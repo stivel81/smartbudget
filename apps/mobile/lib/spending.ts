@@ -92,20 +92,31 @@ export function receiptsSince(receipts: Receipt[], days: number, now: Date): Rec
   return receipts.filter((r) => receiptSpendDate(r).getTime() >= cutoffMs);
 }
 
-/** Sum of line-item amounts per category across all given receipts. */
-export function categoryTotals(receipts: Receipt[]): Record<string, number> {
+/**
+ * Maps a line item's category name to the name its spend is grouped under.
+ * Screens pass useCategories().canonicalName: known names (base or custom,
+ * any casing) keep their category's own name, unknown ones fold into Other
+ * once the user's list is known.
+ */
+export type CategoryGrouping = (category: string) => string;
+
+const asIs: CategoryGrouping = (category) => category;
+
+/** Sum of line-item amounts per category across all given receipts (grouped by `groupAs`). */
+export function categoryTotals(receipts: Receipt[], groupAs: CategoryGrouping = asIs): Record<string, number> {
   const totals: Record<string, number> = {};
   for (const receipt of receipts) {
     for (const item of receipt.raw_response?.items ?? []) {
-      totals[item.category] = (totals[item.category] ?? 0) + item.amount;
+      const key = groupAs(item.category);
+      totals[key] = (totals[key] ?? 0) + item.amount;
     }
   }
   return totals;
 }
 
 /** Category totals as a list, largest spend first (ties broken by name). */
-export function sortedCategoryTotals(receipts: Receipt[]): CategoryTotal[] {
-  return Object.entries(categoryTotals(receipts))
+export function sortedCategoryTotals(receipts: Receipt[], groupAs: CategoryGrouping = asIs): CategoryTotal[] {
+  return Object.entries(categoryTotals(receipts, groupAs))
     .map(([category, spent]) => ({ category, spent }))
     .sort((a, b) => b.spent - a.spent || a.category.localeCompare(b.category));
 }
