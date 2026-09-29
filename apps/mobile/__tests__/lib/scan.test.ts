@@ -3,6 +3,11 @@ import {
   MAX_IMAGE_DIMENSION,
   PICKER_QUALITY,
   UNCATEGORIZED,
+  MIXED_CATEGORIES,
+  MIXED_CATEGORIES_ICON,
+  categoryRowIcon,
+  categoryRowLabel,
+  commonCategory,
   itemCategoryChanges,
   withCategories,
   categoryIconFor,
@@ -314,5 +319,50 @@ describe('resolveReceiptEdits with category changes', () => {
 
   it('treats a result without items as having no category changes', () => {
     expect(resolveReceiptEdits({ merchant: 'M', total: 1 }, 'M', '1', ['Dining'])).toEqual({ kind: 'unchanged' });
+  });
+});
+
+describe('lib/scan Category row helpers', () => {
+  const item = (category: string) => ({ name: 'x', amount: 1, category });
+
+  describe('commonCategory', () => {
+    it('is the shared category when every line has it', () => {
+      expect(commonCategory([item('Dining')])).toBe('Dining');
+      expect(commonCategory([item('Dining'), item('Dining'), item('Dining')])).toBe('Dining');
+    });
+
+    it('is null when lines differ (even only the last one)', () => {
+      expect(commonCategory([item('Dining'), item('Dining'), item('Health')])).toBeNull();
+      expect(commonCategory([item('Health'), item('Dining')])).toBeNull();
+    });
+
+    it('is null without lines', () => {
+      expect(commonCategory([])).toBeNull();
+    });
+  });
+
+  describe('categoryRowLabel', () => {
+    it('shared -> the category, mixed -> "Mixed", none -> "Uncategorized"', () => {
+      expect(MIXED_CATEGORIES).toBe('Mixed');
+      expect(categoryRowLabel([item('Groceries'), item('Groceries')])).toBe('Groceries');
+      expect(categoryRowLabel([item('Groceries'), item('Other')])).toBe(MIXED_CATEGORIES);
+      expect(categoryRowLabel([])).toBe(UNCATEGORIZED);
+    });
+  });
+
+  describe('categoryRowIcon', () => {
+    it("shared -> that category's icon", () => {
+      expect(categoryRowIcon([item('Transport'), item('Transport')])).toBe(CATEGORY_META.Transport.icon);
+    });
+
+    it('mixed -> the mixed icon', () => {
+      expect(MIXED_CATEGORIES_ICON).toBe('shape-outline');
+      expect(categoryRowIcon([item('Transport'), item('Dining')])).toBe(MIXED_CATEGORIES_ICON);
+    });
+
+    it("none, or an unknown shared category -> the Other icon", () => {
+      expect(categoryRowIcon([])).toBe(CATEGORY_META.Other.icon);
+      expect(categoryRowIcon([item('Pets')])).toBe(CATEGORY_META.Other.icon);
+    });
   });
 });

@@ -26,10 +26,11 @@ import {
   JPEG_QUALITY,
   PICKER_QUALITY,
   ScanResult,
-  categoryIconFor,
+  categoryRowIcon,
+  categoryRowLabel,
+  commonCategory,
   resizeTargetFor,
   resolveReceiptEdits,
-  summarizeCategories,
   toScanResult,
   withCategories,
 } from '../lib/scan';
@@ -44,6 +45,7 @@ const CORNER_SIZE = 22;
 const CORNER_WIDTH = 2;
 // Far enough below the screen edge to hide the result card before it slides up.
 const CARD_HIDDEN_OFFSET = 500;
+const ALL_ITEMS = 'all';
 
 async function resizeForUpload(asset: ImagePicker.ImagePickerAsset): Promise<string> {
   const context = ImageManipulator.manipulate(asset.uri);
@@ -114,7 +116,9 @@ export default function ScanScreen(): React.ReactElement {
   const [editedTotal, setEditedTotal] = useState('');
   // One category per line item (same order as result.items); starts as Claude's choice.
   const [editedCategories, setEditedCategories] = useState<string[]>([]);
-  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
+  // Which category picker is open: one line's (its index), the Category
+  // row's (ALL_ITEMS: applies to every line), or none.
+  const [pickerIndex, setPickerIndex] = useState<number | typeof ALL_ITEMS | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -260,9 +264,16 @@ export default function ScanScreen(): React.ReactElement {
     setEditedCategories((prev) => prev.map((current, i) => (i === index ? category : current)));
   };
 
+  // The Category row's picker: one choice for every line. Saved like
+  // per-line changes (Save sends each line whose category differs).
+  const chooseCategoryForAll = (category: string) => {
+    setEditedCategories((prev) => prev.map(() => category));
+  };
+
   const busy = confirming || discarding;
   const displayedItems = result ? withCategories(result.items, editedCategories) : [];
-  const categorySummary = result ? summarizeCategories(displayedItems) : '';
+  const categoryLabel = categoryRowLabel(displayedItems);
+  const canPickForAll = displayedItems.length > 0 && !busy;
   const canCancel = showResult && result !== null && !busy;
   const scanLineTravel = Math.max(frameHeight - SCAN_LINE_HEIGHT, 0);
 
@@ -396,18 +407,29 @@ export default function ScanScreen(): React.ReactElement {
             </ResultRow>
 
             <ResultRow label="Category">
-              <View style={styles.categoryValue}>
+              <TouchableOpacity
+                style={styles.categoryValue}
+                onPress={() => setPickerIndex(ALL_ITEMS)}
+                disabled={!canPickForAll}
+                accessibilityRole="button"
+                accessibilityLabel={`Category: ${categoryLabel}. Change category for all items`}
+                accessibilityState={{ disabled: !canPickForAll }}
+                testID="scan-category-row"
+              >
                 <View style={styles.categoryIcon}>
                   <MaterialCommunityIcons
-                    name={categoryIconFor(categorySummary) as keyof typeof MaterialCommunityIcons.glyphMap}
+                    name={categoryRowIcon(displayedItems) as keyof typeof MaterialCommunityIcons.glyphMap}
                     size={16}
                     color={COLORS.textPrimary}
                   />
                 </View>
                 <Text style={styles.resultValue} numberOfLines={1} testID="scan-category-summary">
-                  {categorySummary}
+                  {categoryLabel}
                 </Text>
-              </View>
+                {displayedItems.length > 0 ? (
+                  <MaterialCommunityIcons name="chevron-down" size={16} color={COLORS.textSecondary} />
+                ) : null}
+              </TouchableOpacity>
             </ResultRow>
 
             <ResultRow label="Date">
@@ -456,7 +478,18 @@ export default function ScanScreen(): React.ReactElement {
         </Animated.View>
       )}
 
-      {result && pickerIndex !== null && result.items[pickerIndex] ? (
+      {result && pickerIndex === ALL_ITEMS && result.items.length > 0 ? (
+        <CategoryPicker
+          visible
+          categories={RECEIPT_CATEGORIES}
+          selected={commonCategory(displayedItems)}
+          subtitle={result.items.length === 1 ? 'Applies to the item' : `Applies to all ${result.items.length} items`}
+          onSelect={chooseCategoryForAll}
+          onClose={() => setPickerIndex(null)}
+        />
+      ) : null}
+
+      {result && typeof pickerIndex === 'number' && result.items[pickerIndex] ? (
         <CategoryPicker
           visible
           categories={RECEIPT_CATEGORIES}

@@ -54,6 +54,34 @@ export function summarizeCategories(items: ReceiptExtraction['items']): string {
   return categories.length > 0 ? categories.join(', ') : UNCATEGORIZED;
 }
 
+/** Category row label when the lines have different categories. */
+export const MIXED_CATEGORIES = 'Mixed';
+/** Category row icon for mixed lines. */
+export const MIXED_CATEGORIES_ICON = 'shape-outline';
+
+/** The category every line shares, or null when they differ or there are no lines. */
+export function commonCategory(items: ReceiptExtraction['items']): string | null {
+  if (items.length === 0) return null;
+  const first = items[0].category;
+  return items.every((item) => item.category === first) ? first : null;
+}
+
+/**
+ * What the result card's Category row shows: the shared category,
+ * MIXED_CATEGORIES when the lines differ, UNCATEGORIZED with no lines.
+ */
+export function categoryRowLabel(items: ReceiptExtraction['items']): string {
+  if (items.length === 0) return UNCATEGORIZED;
+  return commonCategory(items) ?? MIXED_CATEGORIES;
+}
+
+/** Icon for the Category row: the shared category's icon, or MIXED_CATEGORIES_ICON. */
+export function categoryRowIcon(items: ReceiptExtraction['items']): string {
+  const common = commonCategory(items);
+  if (common === null && items.length > 0) return MIXED_CATEGORIES_ICON;
+  return categoryIconFor(common ?? UNCATEGORIZED);
+}
+
 export function toScanResult(receipt: Receipt): ScanResult {
   const extraction = receipt.raw_response;
   return {

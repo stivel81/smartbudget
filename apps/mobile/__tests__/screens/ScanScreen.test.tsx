@@ -411,7 +411,7 @@ describe('ScanScreen — scanning', () => {
     expect(screen.queryByTestId('scan-loading')).toBeNull();
   });
 
-  it('lists every distinct category on the result card', async () => {
+  it('shows "Mixed" on the Category row when the lines have different categories', async () => {
     mockScanReceipt.mockResolvedValue(
       scanResponse({
         items: [
@@ -423,7 +423,8 @@ describe('ScanScreen — scanning', () => {
     );
     renderScan();
     await scanFromGallery();
-    expect(screen.getByText('Groceries, Dining')).toBeTruthy();
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Mixed');
+    expect(screen.getByTestId('icon-shape-outline')).toBeTruthy();
   });
 
   it('shows "Uncategorized" when Claude returned no line items', async () => {
@@ -877,7 +878,7 @@ describe('ScanScreen — line items and category picker', () => {
 
     expect(screen.queryByTestId('category-picker')).toBeNull();
     expect(chipText(1)).toBe('Dining');
-    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Groceries, Dining, Other');
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Mixed');
     expect(mockUpdateReceipt).not.toHaveBeenCalled(); // nothing saved until Save
 
     fireEvent.press(screen.getByTestId('scan-save-button'));
@@ -888,17 +889,200 @@ describe('ScanScreen — line items and category picker', () => {
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
   });
 
-  it('changing the first item changes the summary icon', async () => {
+  it('the Category row follows per-item changes: one shared category shows it (and its icon), different ones show "Mixed"', async () => {
     mockScanReceipt.mockResolvedValue(scanResponse(THREE));
     renderScan();
     await scanFromGallery();
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Mixed');
 
-    fireEvent.press(screen.getByTestId('scan-item-category-0'));
-    fireEvent.press(screen.getByTestId('category-option-Health'));
-    fireEvent.press(screen.getByTestId('scan-item-category-1'));
-    fireEvent.press(screen.getByTestId('category-option-Health'));
+    for (const i of [0, 1, 2]) {
+      fireEvent.press(screen.getByTestId(`scan-item-category-${i}`));
+      fireEvent.press(screen.getByTestId('category-option-Health'));
+    }
 
-    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Health, Other');
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Health');
+    expect(screen.queryByTestId('icon-shape-outline')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('scan-item-category-2'));
+    fireEvent.press(screen.getByTestId('category-option-Other'));
+    expect(screen.getByTestId('scan-category-summary').props.children).toBe('Mixed');
+    expect(screen.getByTestId('icon-shape-outline')).toBeTruthy();
+  });
+
+  describe('Category row: one category for every item', () => {
+    it('shows the shared category when every line has the same one', async () => {
+      mockScanReceipt.mockResolvedValue(
+        scanResponse({
+          items: [
+            { name: 'Milk', amount: 10, category: 'Groceries' },
+            { name: 'Eggs', amount: 8, category: 'Groceries' },
+          ],
+        })
+      );
+      renderScan();
+      await scanFromGallery();
+
+      expect(screen.getByTestId('scan-category-summary').props.children).toBe('Groceries');
+      expect(screen.getByTestId('scan-category-row').props.accessibilityLabel).toBe(
+        'Category: Groceries. Change category for all items'
+      );
+    });
+
+    it('tapping the row opens the picker for all items; shared category checked', async () => {
+      mockScanReceipt.mockResolvedValue(
+        scanResponse({
+          items: [
+            { name: 'Milk', amount: 10, category: 'Groceries' },
+            { name: 'Eggs', amount: 8, category: 'Groceries' },
+          ],
+        })
+      );
+      renderScan();
+      await scanFromGallery();
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+
+      expect(screen.getByTestId('category-picker')).toBeTruthy();
+      expect(screen.getByTestId('category-picker-subtitle').props.children).toBe('Applies to all 2 items');
+      expect(screen.getByTestId('category-option-check-Groceries')).toBeTruthy();
+      expect(screen.queryAllByTestId(/^category-option-check-/)).toHaveLength(1);
+    });
+
+    it('mixed lines: the picker opens with nothing checked', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+
+      expect(screen.getByTestId('category-picker')).toBeTruthy();
+      expect(screen.getByTestId('category-picker-subtitle').props.children).toBe('Applies to all 3 items');
+      expect(screen.queryAllByTestId(/^category-option-check-/)).toHaveLength(0);
+    });
+
+    it('choosing applies it to every item chip and the summary, closes the picker, and Save sends every changed index', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+      fireEvent.press(screen.getByTestId('category-option-Dining'));
+
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+      expect([0, 1, 2].map(chipText)).toEqual(['Dining', 'Dining', 'Dining']);
+      expect(screen.getByTestId('scan-category-summary').props.children).toBe('Dining');
+      expect(mockUpdateReceipt).not.toHaveBeenCalled(); // nothing saved until Save
+
+      fireEvent.press(screen.getByTestId('scan-save-button'));
+
+      await waitFor(() =>
+        expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', {
+          items: [
+            { index: 0, category: 'Dining' },
+            { index: 1, category: 'Dining' },
+            { index: 2, category: 'Dining' },
+          ],
+        })
+      );
+      await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    });
+
+    it('Save sends only the lines whose category actually changed', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE)); // Groceries, Groceries, Other
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+      fireEvent.press(screen.getByTestId('category-option-Groceries'));
+      expect([0, 1, 2].map(chipText)).toEqual(['Groceries', 'Groceries', 'Groceries']);
+
+      fireEvent.press(screen.getByTestId('scan-save-button'));
+
+      await waitFor(() =>
+        expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', { items: [{ index: 2, category: 'Groceries' }] })
+      );
+    });
+
+    it('per-item chips still work after applying to all', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+      fireEvent.press(screen.getByTestId('category-option-Health'));
+      fireEvent.press(screen.getByTestId('scan-item-category-1'));
+      expect(screen.getByTestId('category-picker-subtitle').props.children).toBe('Coffee');
+      fireEvent.press(screen.getByTestId('category-option-Transport'));
+
+      expect([0, 1, 2].map(chipText)).toEqual(['Health', 'Transport', 'Health']);
+      expect(screen.getByTestId('scan-category-summary').props.children).toBe('Mixed');
+
+      fireEvent.press(screen.getByTestId('scan-save-button'));
+      await waitFor(() =>
+        expect(mockUpdateReceipt).toHaveBeenCalledWith('r1', {
+          items: [
+            { index: 0, category: 'Health' },
+            { index: 1, category: 'Transport' },
+            { index: 2, category: 'Health' },
+          ],
+        })
+      );
+    });
+
+    it('closing the picker without choosing changes nothing', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+      fireEvent.press(screen.getByTestId('category-picker-close'));
+
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+      expect([0, 1, 2].map(chipText)).toEqual(['Groceries', 'Groceries', 'Other']);
+      fireEvent.press(screen.getByTestId('scan-save-button'));
+      await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+      expect(mockUpdateReceipt).not.toHaveBeenCalled();
+    });
+
+    it('a single item: the subtitle says so', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse({ items: [{ name: 'Milk', amount: 10, category: 'Groceries' }] }));
+      renderScan();
+      await scanFromGallery();
+
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+
+      expect(screen.getByTestId('category-picker-subtitle').props.children).toBe('Applies to the item');
+    });
+
+    it('no line items: the row is not tappable and has no chevron', async () => {
+      mockScanReceipt.mockResolvedValue(scanResponse({ items: [] }));
+      renderScan();
+      await scanFromGallery();
+
+      const row = screen.getByTestId('scan-category-row');
+      expect(row.props.accessibilityState).toEqual({ disabled: true });
+      expect(within(row).queryByTestId('icon-chevron-down')).toBeNull();
+      fireEvent.press(row);
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+    });
+
+    it('is locked while saving', async () => {
+      let resolveUpdate!: (v: unknown) => void;
+      mockScanReceipt.mockResolvedValue(scanResponse(THREE));
+      mockUpdateReceipt.mockReturnValue(new Promise((res) => (resolveUpdate = res)));
+      renderScan();
+      await scanFromGallery();
+      fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'Aroma');
+      fireEvent.press(screen.getByTestId('scan-save-button'));
+
+      await waitFor(() => expect(screen.getByTestId('scan-category-row').props.accessibilityState).toEqual({ disabled: true }));
+      fireEvent.press(screen.getByTestId('scan-category-row'));
+      expect(screen.queryByTestId('category-picker')).toBeNull();
+
+      resolveUpdate({ receipt: { id: 'r1' } });
+      await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());
+    });
   });
 
   it('sends category changes together with merchant edits', async () => {
