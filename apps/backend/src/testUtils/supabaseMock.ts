@@ -107,12 +107,16 @@ export const mockUpdateUser = jest.fn();
 // client's mockSignInWithPassword, so tests can prove which client ran it.
 export const mockIsolatedSignIn = jest.fn();
 export const mockIsolatedAdminSignOut = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
+// Logout falls back to exchanging the refresh token on an isolated client
+// (then signing that fresh session out) when the access token has expired.
+export const mockIsolatedRefreshSession = jest.fn();
 export const isolatedClients: any[] = [];
 export const createIsolatedAuthClient = jest.fn(() => {
   const client: any = { auth: {} };
   client.auth.verifyOtp = jest.fn((...args: unknown[]) => mockVerifyOtp(...args));
   client.auth.updateUser = jest.fn((...args: unknown[]) => mockUpdateUser(...args));
   client.auth.signInWithPassword = jest.fn((...args: unknown[]) => mockIsolatedSignIn(...args));
+  client.auth.refreshSession = jest.fn((...args: unknown[]) => mockIsolatedRefreshSession(...args));
   client.auth.admin = { signOut: jest.fn((...args: unknown[]) => mockIsolatedAdminSignOut(...args)) };
   isolatedClients.push(client);
   return client;

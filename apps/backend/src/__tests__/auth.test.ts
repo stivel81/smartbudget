@@ -22,11 +22,12 @@ import {
   isolatedClients,
   mockIsolatedSignIn,
   mockIsolatedAdminSignOut,
+  mockIsolatedRefreshSession,
   mockUpdateUserById,
   mockGetUser,
   mockResend,
 } from '../testUtils/supabaseMock';
-import { displayNameOf, sessionPayload } from '../routes/auth';
+import { displayNameOf, sessionExpiresAt, sessionPayload } from '../routes/auth';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -178,7 +179,7 @@ describe('POST /api/v1/auth/login', () => {
   it("returns the user's display name from user_metadata in the session", async () => {
     mockSignInWithPassword.mockResolvedValue({
       data: {
-        session: { access_token: 'tok', refresh_token: 'ref' },
+        session: { access_token: 'tok', refresh_token: 'ref', expires_in: 3600, expires_at: 1790003600 },
         user: { id: 'user-1', email: 'a@b.com', user_metadata: { name: '  Adrian Schtivelmager ' } },
       },
       error: null,
@@ -193,6 +194,8 @@ describe('POST /api/v1/auth/login', () => {
       session: {
         access_token: 'tok',
         refresh_token: 'ref',
+        expires_at: 1790003600,
+        expires_in: 3600,
         user: { id: 'user-1', email: 'a@b.com', name: 'Adrian Schtivelmager' },
       },
     });
@@ -237,7 +240,7 @@ describe('POST /api/v1/auth/refresh', () => {
   it('returns a new session on the happy path', async () => {
     mockRefreshSession.mockResolvedValue({
       data: {
-        session: { access_token: 'new-tok', refresh_token: 'new-ref' },
+        session: { access_token: 'new-tok', refresh_token: 'new-ref', expires_in: 3600, expires_at: 1790003600 },
         user: { id: 'user-1', email: 'a@b.com' },
       },
       error: null,
@@ -251,6 +254,8 @@ describe('POST /api/v1/auth/refresh', () => {
     expect(response.body.session).toEqual({
       access_token: 'new-tok',
       refresh_token: 'new-ref',
+      expires_at: 1790003600,
+      expires_in: 3600,
       user: { id: 'user-1', email: 'a@b.com', name: null },
     });
     expect(mockRefreshSession).toHaveBeenCalledWith({ refresh_token: 'old-ref' });
@@ -278,21 +283,189 @@ describe('POST /api/v1/auth/refresh', () => {
 });
 
 describe('POST /api/v1/auth/logout', () => {
-  it('signs out on the happy path', async () => {
-    mockAdminSignOut.mockResolvedValue({ error: null });
+  const EXPIRED_JWT_ERROR = { message: 'invalid JWT: unable to parse or verify signature, token has invalid claims: token is expired', status: 403 };
+  let warnSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    isolatedClients.length = 0;
+    mockAdminSignOut.mockReset();
+    mockIsolatedRefreshSession.mockReset();
+    mockIsolatedAdminSignOut.mockReset();
+    mockIsolatedAdminSignOut.mockResolvedValue({ data: {}, error: null });
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  const refreshed = (accessToken = 'fresh-access') => ({
+    data: {
+      session: { access_token: accessToken, refresh_token: 'rotated-ref', expires_in: 3600 },
+      user: { id: 'user-123', email: 'user@example.com' },
+    },
+    error: null,
+  });
+
+  it('signs out with a valid access token (no refresh-token exchange needed)', async () => {
+    mockAdminSignOut.mockResolvedValueOnce({ data: null, error: null });
 
     const response = await request(app)
       .post('/api/v1/auth/logout')
-      .set('Authorization', 'Bearer valid-token');
+      .set('Authorization', 'Bearer valid-token')
+      .send({ refresh_token: 'ref-1' });
 
     expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: 'Signed out successfully' });
+    expect(mockAdminSignOut).toHaveBeenCalledTimes(1);
+    expect(mockAdminSignOut).toHaveBeenCalledWith('valid-token');
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+    expect(mockIsolatedRefreshSession).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('returns 400 when the Authorization header is missing', async () => {
+  it('still works for an older app that sends only the access token', async () => {
+    mockAdminSignOut.mockResolvedValueOnce({ data: null, error: null });
+
+    const response = await request(app).post('/api/v1/auth/logout').set('Authorization', 'Bearer valid-token');
+
+    expect(response.status).toBe(200);
+    expect(mockAdminSignOut).toHaveBeenCalledWith('valid-token');
+  });
+
+  it('expired access token + valid refresh token: exchanges it on an isolated client and revokes that session', async () => {
+    mockAdminSignOut.mockResolvedValueOnce({ data: null, error: EXPIRED_JWT_ERROR });
+    mockIsolatedRefreshSession.mockResolvedValueOnce(refreshed('fresh-access'));
+
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', 'Bearer expired-token')
+      .send({ refresh_token: 'ref-1' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: 'Signed out successfully' });
+    expect(mockAdminSignOut).toHaveBeenCalledWith('expired-token');
+    expect(createIsolatedAuthClient).toHaveBeenCalledTimes(1);
+    expect(mockIsolatedRefreshSession).toHaveBeenCalledWith({ refresh_token: 'ref-1' });
+    // The fresh session is signed out on the same isolated client that
+    // exchanged the refresh token — never on the shared client.
+    expect(isolatedClients[0].auth.refreshSession).toHaveBeenCalledTimes(1);
+    expect(isolatedClients[0].auth.admin.signOut).toHaveBeenCalledWith('fresh-access');
+    expect(mockAdminSignOut).toHaveBeenCalledTimes(1);
+    expect(mockRefreshSession).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('access token rejected'));
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('refresh token only (no Authorization header) revokes via the refresh token', async () => {
+    mockIsolatedRefreshSession.mockResolvedValueOnce(refreshed('fresh-2'));
+
+    const response = await request(app).post('/api/v1/auth/logout').send({ refresh_token: '  ref-2  ' });
+
+    expect(response.status).toBe(200);
+    expect(mockAdminSignOut).not.toHaveBeenCalled();
+    expect(mockIsolatedRefreshSession).toHaveBeenCalledWith({ refresh_token: 'ref-2' });
+    expect(mockIsolatedAdminSignOut).toHaveBeenCalledWith('fresh-2');
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('access token throwing (network) falls back to the refresh token', async () => {
+    mockAdminSignOut.mockRejectedValueOnce(new Error('fetch failed'));
+    mockIsolatedRefreshSession.mockResolvedValueOnce(refreshed());
+
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', 'Bearer valid-token')
+      .send({ refresh_token: 'ref-1' });
+
+    expect(response.status).toBe(200);
+    expect(mockIsolatedAdminSignOut).toHaveBeenCalledWith('fresh-access');
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('both tokens invalid: still 200 (idempotent), nothing revoked, logged server-side', async () => {
+    mockAdminSignOut.mockResolvedValueOnce({ data: null, error: EXPIRED_JWT_ERROR });
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
+      data: { session: null, user: null },
+      error: { message: 'Invalid Refresh Token: Already Used' },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', 'Bearer expired-token')
+      .send({ refresh_token: 'used-ref' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ message: 'Signed out successfully' });
+    expect(mockIsolatedAdminSignOut).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('refresh token rejected (Invalid Refresh Token: Already Used)'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('session not revoked'));
+  });
+
+  it('expired access token and no refresh token: 200 and logged', async () => {
+    mockAdminSignOut.mockResolvedValueOnce({ data: null, error: EXPIRED_JWT_ERROR });
+
+    const response = await request(app).post('/api/v1/auth/logout').set('Authorization', 'Bearer expired-token');
+
+    expect(response.status).toBe(200);
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.not.stringContaining('refresh token'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('session not revoked'));
+  });
+
+  it('a refreshed session without a session object counts as not revoked', async () => {
+    mockIsolatedRefreshSession.mockResolvedValueOnce({ data: { session: null, user: null }, error: null });
+
+    const response = await request(app).post('/api/v1/auth/logout').send({ refresh_token: 'ref' });
+
+    expect(response.status).toBe(200);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('refresh token rejected (no session)'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('session not revoked'));
+  });
+
+  it('signing out the refreshed session failing: 200 and logged', async () => {
+    mockIsolatedRefreshSession.mockResolvedValueOnce(refreshed());
+    mockIsolatedAdminSignOut.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+
+    const response = await request(app).post('/api/v1/auth/logout').send({ refresh_token: 'ref' });
+
+    expect(response.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith('Logout: signing out the refreshed session failed:', { message: 'boom' });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('session not revoked'));
+  });
+
+  it('the refresh-token path throwing: 200 and logged', async () => {
+    mockIsolatedRefreshSession.mockRejectedValueOnce(new Error('network down'));
+
+    const response = await request(app).post('/api/v1/auth/logout').send({ refresh_token: 'ref' });
+
+    expect(response.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith('Logout: revoking via the refresh token threw:', expect.any(Error));
+  });
+
+  it('returns 400 when neither token is sent (malformed request)', async () => {
     const response = await request(app).post('/api/v1/auth/logout');
 
     expect(response.status).toBe(400);
     expect(mockAdminSignOut).not.toHaveBeenCalled();
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a non-Bearer header and no body', { header: 'Basic abc', body: {} }],
+    ['an empty Bearer token and a blank refresh token', { header: 'Bearer ', body: { refresh_token: '   ' } }],
+    ['a non-string refresh token', { header: undefined, body: { refresh_token: 42 } }],
+  ])('returns 400 for %s', async (_label, { header, body }) => {
+    let req = request(app).post('/api/v1/auth/logout');
+    if (header) req = req.set('Authorization', header);
+    const response = await req.send(body);
+
+    expect(response.status).toBe(400);
+    expect(mockAdminSignOut).not.toHaveBeenCalled();
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
   });
 });
 
@@ -445,6 +618,8 @@ describe('POST /api/v1/auth/reset-password', () => {
       session: {
         access_token: 'recovery-access',
         refresh_token: 'recovery-refresh',
+        expires_at: null,
+        expires_in: null,
         user: { id: 'user-1', email: 'a@b.com', name: null },
       },
     });
@@ -899,8 +1074,47 @@ describe('displayNameOf / sessionPayload', () => {
       { id: 'u1', email: 'a@b.com', user_metadata: { name: 'Ada' }, app_metadata: { is_admin: true } } as any
     );
     expect(payload).toEqual({
-      session: { access_token: 'a', refresh_token: 'r', user: { id: 'u1', email: 'a@b.com', name: 'Ada' } },
+      session: {
+        access_token: 'a',
+        refresh_token: 'r',
+        expires_at: expect.any(Number),
+        expires_in: 3600,
+        user: { id: 'u1', email: 'a@b.com', name: 'Ada' },
+      },
     });
+  });
+
+  describe('sessionExpiresAt', () => {
+    const NOW_MS = 1_790_000_000_000;
+
+    it("uses Supabase's expires_at when present", () => {
+      expect(sessionExpiresAt({ access_token: 'a', refresh_token: 'r', expires_at: 1790003600, expires_in: 60 }, NOW_MS)).toBe(1790003600);
+    });
+
+    it('derives it from expires_in otherwise', () => {
+      expect(sessionExpiresAt({ access_token: 'a', refresh_token: 'r', expires_in: 3600 }, NOW_MS)).toBe(1790003600);
+    });
+
+    it.each([
+      ['neither', {}],
+      ['zero / negative', { expires_at: 0, expires_in: -5 }],
+      ['non-numbers', { expires_at: '1790003600', expires_in: NaN }],
+    ])('is null for %s', (_label, extra) => {
+      expect(sessionExpiresAt({ access_token: 'a', refresh_token: 'r', ...(extra as object) }, NOW_MS)).toBeNull();
+    });
+
+    it('defaults to the current time', () => {
+      const before = Math.floor(Date.now() / 1000);
+      const at = sessionExpiresAt({ access_token: 'a', refresh_token: 'r', expires_in: 100 })!;
+      expect(at).toBeGreaterThanOrEqual(before + 100);
+      expect(at).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 100);
+    });
+  });
+
+  it('sends expires_in as null when Supabase gives a non-positive one', () => {
+    const payload = sessionPayload({ access_token: 'a', refresh_token: 'r', expires_in: 0 }, { id: 'u1' });
+    expect(payload.session.expires_in).toBeNull();
+    expect(payload.session.expires_at).toBeNull();
   });
 });
 
@@ -953,6 +1167,8 @@ describe('POST /api/v1/auth/verify-signup', () => {
       session: {
         access_token: 'signup-access',
         refresh_token: 'signup-refresh',
+        expires_at: null,
+        expires_in: null,
         user: { id: 'user-9', email: 'new@example.com', name: 'Adrian Schtivelmager' },
       },
     });

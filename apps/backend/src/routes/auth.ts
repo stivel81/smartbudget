@@ -41,6 +41,10 @@ export const EMAIL_NOT_CONFIRMED_CODE = 'email_not_confirmed';
 interface SessionLike {
   access_token: string;
   refresh_token: string;
+  /** Access-token lifetime in seconds (Supabase: 3600 by default). */
+  expires_in?: number;
+  /** Access-token expiry, unix seconds. */
+  expires_at?: number;
 }
 
 interface UserLike {
@@ -60,12 +64,31 @@ export const displayNameOf = (user: UserLike): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const positiveNumberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+
+/**
+ * When the access token expires, unix seconds: Supabase's expires_at, else
+ * derived from expires_in; null when Supabase reported neither.
+ */
+export const sessionExpiresAt = (session: SessionLike, nowMs: number = Date.now()): number | null => {
+  const expiresAt = positiveNumberOrNull(session.expires_at);
+  if (expiresAt !== null) return expiresAt;
+  const expiresIn = positiveNumberOrNull(session.expires_in);
+  return expiresIn !== null ? Math.floor(nowMs / 1000) + expiresIn : null;
+};
+
 // The one session shape every sign-in route returns (/login, /refresh,
 // /reset-password, /verify-signup), so the app can treat them identically.
+// expires_at (unix seconds) / expires_in (seconds) let the app renew the
+// access token shortly before it expires; the app prefers expires_in, which
+// doesn't depend on the phone's clock agreeing with the server's.
 export const sessionPayload = (session: SessionLike, user: UserLike) => ({
   session: {
     access_token: session.access_token,
     refresh_token: session.refresh_token,
+    expires_at: sessionExpiresAt(session),
+    expires_in: positiveNumberOrNull(session.expires_in),
     user: {
       id: user.id,
       email: user.email,
@@ -660,42 +683,87 @@ router.post('/change-password', requireAuth, async (req: AuthedRequest, res: Res
   }
 });
 
-// POST /api/v1/auth/logout
+interface LogoutRequest {
+  refresh_token?: unknown;
+}
+
+/**
+ * Revoke the session behind these tokens. Returns whether anything was
+ * revoked; never throws. Failures are logged here, never shown to the user.
+ *
+ * 1. The access token, when it is still valid: admin.signOut(jwt) revokes
+ *    its session (scope 'global', unchanged from before).
+ * 2. Otherwise (typically: the access token already expired — admin.signOut
+ *    then fails with "invalid JWT ... token is expired"), the refresh token:
+ *    exchange it for a fresh session and sign *that* out. The exchange also
+ *    consumes the refresh token (Supabase rotates them), and the sign-out
+ *    revokes the session it belongs to, so neither the old nor the new
+ *    refresh token can be used again. It runs on a fresh per-request client
+ *    (createIsolatedAuthClient): refreshSession() stores the session on the
+ *    client instance, which must never be the shared one (see 9062cae).
+ */
+async function revokeSession(accessToken: string, refreshToken: string): Promise<boolean> {
+  if (accessToken) {
+    try {
+      const { error } = await supabaseAuth.auth.admin.signOut(accessToken);
+      if (!error) return true;
+      console.warn(
+        `Logout: access token rejected (${error.message})${refreshToken ? ', revoking via the refresh token' : ''}`
+      );
+    } catch (err) {
+      console.warn('Logout: signing out the access token threw:', err);
+    }
+  }
+
+  if (refreshToken) {
+    try {
+      const client = createIsolatedAuthClient();
+      const { data, error } = await client.auth.refreshSession({ refresh_token: refreshToken });
+      if (error || !data.session) {
+        console.warn(`Logout: refresh token rejected (${error?.message ?? 'no session'})`);
+        return false;
+      }
+      const { error: signOutError } = await client.auth.admin.signOut(data.session.access_token);
+      if (!signOutError) return true;
+      console.error('Logout: signing out the refreshed session failed:', signOutError);
+    } catch (err) {
+      console.error('Logout: revoking via the refresh token threw:', err);
+    }
+  }
+
+  return false;
+}
+
+// POST /api/v1/auth/logout — revoke the app's session server-side.
+//
+// Accepts the access token (Authorization: Bearer) and/or the refresh token
+// (body.refresh_token); the app sends both, so a session whose access token
+// already expired is still revoked (see revokeSession). Idempotent: once the
+// request names a session it always answers 200, whether or not anything
+// was left to revoke (already signed out, tokens expired/revoked) — the app
+// clears its local session regardless, and failures are only logged.
 router.post('/logout', async (req: Request, res: Response) => {
-  // Extract token from Authorization header
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const accessToken =
+    authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+  const { refresh_token } = (req.body ?? {}) as LogoutRequest;
+  const refreshToken = typeof refresh_token === 'string' ? refresh_token.trim() : '';
+
+  if (!accessToken && !refreshToken) {
     return res.status(400).json({
-      error: 'Missing or invalid Authorization header',
+      error: 'Missing session: send the access token (Authorization header) and/or refresh_token',
       status: 400,
     });
   }
 
-  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-  try {
-    // Sign out the session using the access token
-    // In Supabase v2 with service role, we can use admin.signOut
-    const { error } = await supabaseAuth.auth.admin.signOut(token);
-
-    if (error) {
-      console.error('Logout error:', error);
-      return res.status(400).json({
-        error: 'Failed to sign out',
-        status: 400,
-      });
-    }
-
-    return res.status(200).json({
-      message: 'Signed out successfully',
-    });
-  } catch (err) {
-    console.error('Logout error:', err);
-    return res.status(500).json({
-      error: 'Internal server error',
-      status: 500,
-    });
+  const revoked = await revokeSession(accessToken, refreshToken);
+  if (!revoked) {
+    console.error('Logout error: session not revoked (tokens invalid, expired or already revoked)');
   }
+
+  return res.status(200).json({
+    message: 'Signed out successfully',
+  });
 });
 
 export default router;
