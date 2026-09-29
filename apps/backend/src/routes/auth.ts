@@ -171,7 +171,12 @@ router.post('/signup', async (req: Request, res: Response) => {
     // can't log in until it's verified (Auth setting "Confirm email",
     // on by default) — replaces the previous admin.createUser(email_confirm:
     // true) auto-confirm shortcut.
-    const { data, error } = await supabaseAuth.auth.signUp({
+    //
+    // signUp() stores any session it gets back on the client instance, so it
+    // runs on a fresh per-request client (createIsolatedAuthClient), never
+    // the shared supabaseAuth — see the note on /refresh.
+    const client = createIsolatedAuthClient();
+    const { data, error } = await client.auth.signUp({
       email,
       password,
       options: { data: { name } },
@@ -237,8 +242,11 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    // Authenticate user
-    const { data, error } = await supabaseAuth.auth.signInWithPassword({
+    // Authenticate user. signInWithPassword() stores the new session on the
+    // client instance: per-request client, never the shared supabaseAuth
+    // (see the note on /refresh).
+    const client = createIsolatedAuthClient();
+    const { data, error } = await client.auth.signInWithPassword({
       email,
       password,
     });
@@ -293,8 +301,15 @@ router.post('/login', async (req: Request, res: Response) => {
 // POST /api/v1/auth/refresh — exchange a refresh token for a new session,
 // so the mobile app can silently renew an expired access token instead of
 // forcing a full re-login. Mobile never talks to Supabase directly, so this
-// wraps supabaseAuth.auth.refreshSession() the same way /login wraps
-// signInWithPassword().
+// wraps refreshSession() the same way /login wraps signInWithPassword().
+//
+// refreshSession() stores the refreshed session *on the client instance*.
+// On the shared supabaseAuth singleton, two concurrent refreshes (or a
+// refresh racing a login/signup) would overwrite each other's session state,
+// and anything reading that state could hand one user's session to another
+// request. So every call runs on a fresh per-request client
+// (createIsolatedAuthClient) that is garbage-collected afterwards — the same
+// class of bug fixed in 9062cae for getUser/signInWithPassword.
 router.post('/refresh', async (req: Request, res: Response) => {
   const { refresh_token } = req.body as RefreshRequest;
 
@@ -306,7 +321,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
   }
 
   try {
-    const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token });
+    const client = createIsolatedAuthClient();
+    const { data, error } = await client.auth.refreshSession({ refresh_token });
 
     if (error || !data.session || !data.user) {
       return res.status(401).json({

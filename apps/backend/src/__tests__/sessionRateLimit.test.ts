@@ -48,13 +48,13 @@ function freshApp(): { app: http.Server; mock: MockModule; authLimit: number; se
   });
 
   // Happy-path Supabase answers for the routes exercised below.
-  mock.mockSignInWithPassword.mockReset();
-  mock.mockSignInWithPassword.mockResolvedValue({
+  mock.mockIsolatedSignIn.mockReset();
+  mock.mockIsolatedSignIn.mockResolvedValue({
     data: { session: null, user: null },
     error: { message: 'Invalid login credentials', status: 400 },
   });
-  mock.mockRefreshSession.mockReset();
-  mock.mockRefreshSession.mockResolvedValue({
+  mock.mockIsolatedRefreshSession.mockReset();
+  mock.mockIsolatedRefreshSession.mockResolvedValue({
     data: { session: { access_token: 'acc', refresh_token: 'ref', expires_in: 3600 }, user: { id: 'u1', email: 'a@b.com' } },
     error: null,
   });
@@ -120,7 +120,7 @@ describe('Auth rate limits per route', () => {
 
     await exhaust(app, mock, refresh, sessionLimit);
 
-    expect(mock.mockRefreshSession).toHaveBeenCalledTimes(sessionLimit);
+    expect(mock.mockIsolatedRefreshSession).toHaveBeenCalledTimes(sessionLimit);
     expect(mock.supabase.from).toHaveBeenCalledWith('rate_limit_violations');
   });
 
@@ -133,7 +133,7 @@ describe('Auth rate limits per route', () => {
     for (let i = 0; i < authLimit; i++) {
       expect((await login(app)).status).toBe(401); // wrong password, not 429
     }
-    expect(mock.mockSignInWithPassword).toHaveBeenCalledTimes(authLimit);
+    expect(mock.mockIsolatedSignIn).toHaveBeenCalledTimes(authLimit);
   });
 
   it('/logout has its own budget (60), separate from /refresh', async () => {

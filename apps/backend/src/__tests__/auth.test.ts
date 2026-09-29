@@ -12,8 +12,6 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 import { app } from '../index';
 import {
   mockSignUp,
-  mockSignInWithPassword,
-  mockRefreshSession,
   mockAdminSignOut,
   mockResetPasswordForEmail,
   mockVerifyOtp,
@@ -26,6 +24,8 @@ import {
   mockUpdateUserById,
   mockGetUser,
   mockResend,
+  supabaseAuth as sharedSupabaseAuth,
+  defaultIsolatedClientFactory,
 } from '../testUtils/supabaseMock';
 import { displayNameOf, sessionExpiresAt, sessionPayload } from '../routes/auth';
 
@@ -35,7 +35,7 @@ beforeEach(() => {
 
 describe('POST /api/v1/auth/signup', () => {
   it('creates a pending (unconfirmed) account on the happy path', async () => {
-    mockSignUp.mockResolvedValue({
+    mockSignUp.mockResolvedValueOnce({
       data: {
         user: { id: 'user-1', email: 'new@example.com', identities: [{ id: 'ident-1' }] },
         session: null,
@@ -57,7 +57,7 @@ describe('POST /api/v1/auth/signup', () => {
   });
 
   it('returns 400 when the email is already registered (empty identities)', async () => {
-    mockSignUp.mockResolvedValue({
+    mockSignUp.mockResolvedValueOnce({
       data: { user: { id: 'user-1', email: 'dup@example.com', identities: [] }, session: null },
       error: null,
     });
@@ -71,7 +71,7 @@ describe('POST /api/v1/auth/signup', () => {
   });
 
   it('returns 400 when Supabase reports the email is already registered', async () => {
-    mockSignUp.mockResolvedValue({
+    mockSignUp.mockResolvedValueOnce({
       data: { user: null, session: null },
       error: { message: 'User already exists' },
     });
@@ -112,7 +112,7 @@ describe('POST /api/v1/auth/signup', () => {
 
 describe('POST /api/v1/auth/login', () => {
   it('returns a session on the happy path', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: {
         session: { access_token: 'tok', refresh_token: 'ref' },
         user: { id: 'user-1', email: 'a@b.com' },
@@ -129,7 +129,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it('returns 401 with a clear message when the email is unconfirmed', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Email not confirmed', status: 400 },
     });
@@ -145,7 +145,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it('recognises an unconfirmed email by Supabase error code alone', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Something else', status: 400, code: 'email_not_confirmed' },
     });
@@ -163,7 +163,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it('never adds the email_not_confirmed code to a wrong-password or unknown-account error', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Invalid login credentials', status: 400, code: 'invalid_credentials' },
     });
@@ -177,7 +177,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it("returns the user's display name from user_metadata in the session", async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: {
         session: { access_token: 'tok', refresh_token: 'ref', expires_in: 3600, expires_at: 1790003600 },
         user: { id: 'user-1', email: 'a@b.com', user_metadata: { name: '  Adrian Schtivelmager ' } },
@@ -202,7 +202,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it('returns 403 with a clear message when the account is suspended', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'User is banned', status: 400, code: 'user_banned' },
     });
@@ -216,7 +216,7 @@ describe('POST /api/v1/auth/login', () => {
   });
 
   it('returns 401 for invalid credentials', async () => {
-    mockSignInWithPassword.mockResolvedValue({
+    mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Invalid login credentials', status: 400 },
     });
@@ -238,7 +238,7 @@ describe('POST /api/v1/auth/login', () => {
 
 describe('POST /api/v1/auth/refresh', () => {
   it('returns a new session on the happy path', async () => {
-    mockRefreshSession.mockResolvedValue({
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
       data: {
         session: { access_token: 'new-tok', refresh_token: 'new-ref', expires_in: 3600, expires_at: 1790003600 },
         user: { id: 'user-1', email: 'a@b.com' },
@@ -258,11 +258,11 @@ describe('POST /api/v1/auth/refresh', () => {
       expires_in: 3600,
       user: { id: 'user-1', email: 'a@b.com', name: null },
     });
-    expect(mockRefreshSession).toHaveBeenCalledWith({ refresh_token: 'old-ref' });
+    expect(mockIsolatedRefreshSession).toHaveBeenCalledWith({ refresh_token: 'old-ref' });
   });
 
   it('returns 401 for an invalid or expired refresh token', async () => {
-    mockRefreshSession.mockResolvedValue({
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Invalid Refresh Token' },
     });
@@ -278,7 +278,203 @@ describe('POST /api/v1/auth/refresh', () => {
     const response = await request(app).post('/api/v1/auth/refresh').send({});
 
     expect(response.status).toBe(400);
-    expect(mockRefreshSession).not.toHaveBeenCalled();
+    expect(mockIsolatedRefreshSession).not.toHaveBeenCalled();
+  });
+});
+
+// Session-storing auth calls (refreshSession, signInWithPassword, signUp)
+// must run on a fresh per-request client: a Supabase auth client keeps the
+// session it last obtained, so on a shared instance concurrent requests
+// overwrite each other's session state (same bug class as 9062cae).
+describe('session-storing auth calls use one isolated client per request', () => {
+  beforeEach(() => {
+    isolatedClients.length = 0;
+    mockIsolatedRefreshSession.mockReset();
+    mockIsolatedSignIn.mockReset();
+    mockSignUp.mockReset();
+  });
+
+  it('the shared supabaseAuth client exposes no session-storing methods', () => {
+    // Guard for the tests below: a route that regresses to the shared client
+    // throws (500) instead of silently passing.
+    for (const method of ['refreshSession', 'signInWithPassword', 'signUp', 'verifyOtp', 'updateUser', 'setSession']) {
+      expect(sharedSupabaseAuth.auth).not.toHaveProperty(method);
+    }
+  });
+
+  it('/refresh creates a fresh isolated client for every request', async () => {
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok-1', refresh_token: 'ref-1b' }, user: { id: 'user-1', email: 'a@b.com' } },
+      error: null,
+    });
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok-2', refresh_token: 'ref-2b' }, user: { id: 'user-2', email: 'c@d.com' } },
+      error: null,
+    });
+
+    const first = await request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref-1' });
+    const second = await request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref-2' });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(createIsolatedAuthClient).toHaveBeenCalledTimes(2);
+    expect(isolatedClients).toHaveLength(2);
+    expect(isolatedClients[0]).not.toBe(isolatedClients[1]);
+    expect(isolatedClients[0].auth.refreshSession).toHaveBeenCalledTimes(1);
+    expect(isolatedClients[0].auth.refreshSession).toHaveBeenCalledWith({ refresh_token: 'ref-1' });
+    expect(isolatedClients[1].auth.refreshSession).toHaveBeenCalledTimes(1);
+    expect(isolatedClients[1].auth.refreshSession).toHaveBeenCalledWith({ refresh_token: 'ref-2' });
+  });
+
+  it('/refresh does not create a client when the request is invalid', async () => {
+    const response = await request(app).post('/api/v1/auth/refresh').send({});
+
+    expect(response.status).toBe(400);
+    expect(createIsolatedAuthClient).not.toHaveBeenCalled();
+  });
+
+  describe('concurrent /refresh for different users', () => {
+    const SESSIONS: Record<string, { access_token: string; refresh_token: string; user: { id: string; email: string } }> = {
+      'ref-alice': { access_token: 'tok-alice', refresh_token: 'ref-alice-2', user: { id: 'user-alice', email: 'alice@example.com' } },
+      'ref-bob': { access_token: 'tok-bob', refresh_token: 'ref-bob-2', user: { id: 'user-bob', email: 'bob@example.com' } },
+    };
+
+    // A fake auth client that behaves like GoTrueClient: refreshSession()
+    // stores the new session on the instance, and the result reflects that
+    // instance state once the (gated) network call completes. Two requests
+    // sharing one instance therefore see whichever session was stored last.
+    function makeStatefulClient(gates: Record<string, Promise<void>>, onCall: () => void) {
+      const state: { session: (typeof SESSIONS)[string] | null } = { session: null };
+      return {
+        auth: {
+          refreshSession: jest.fn(async ({ refresh_token }: { refresh_token: string }) => {
+            state.session = SESSIONS[refresh_token];
+            onCall();
+            await gates[refresh_token];
+            const session = state.session!;
+            return { data: { session, user: session.user }, error: null };
+          }),
+        },
+      };
+    }
+
+    // Fires both refreshes, waits until both are parked inside
+    // refreshSession, then releases Bob's first and Alice's second so the
+    // two requests interleave.
+    type ClientFactory = (gates: Record<string, Promise<void>>, onCall: () => void) => unknown;
+
+    async function interleavedRefreshes(clientFor: ClientFactory) {
+      let releaseAlice!: () => void;
+      let releaseBob!: () => void;
+      const gates = {
+        'ref-alice': new Promise<void>((r) => (releaseAlice = r)),
+        'ref-bob': new Promise<void>((r) => (releaseBob = r)),
+      };
+      let calls = 0;
+      let bothInFlight!: () => void;
+      const bothInFlightP = new Promise<void>((r) => (bothInFlight = r));
+      const onCall = () => {
+        calls += 1;
+        if (calls === 2) bothInFlight();
+      };
+      createIsolatedAuthClient.mockImplementation(() => clientFor(gates, onCall) as any);
+
+      const alice = request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref-alice' }).then((r) => r);
+      const bob = request(app).post('/api/v1/auth/refresh').send({ refresh_token: 'ref-bob' }).then((r) => r);
+
+      // Fail fast (rather than time out) if a request finishes without ever
+      // reaching refreshSession on a client from createIsolatedAuthClient.
+      const first = await Promise.race([
+        bothInFlightP.then(() => 'in-flight' as const),
+        Promise.all([alice, bob]).then(() => 'finished-early' as const),
+      ]);
+      if (first === 'finished-early') {
+        throw new Error('/refresh returned without calling refreshSession on a per-request isolated client');
+      }
+      releaseBob();
+      const bobRes = await bob;
+      releaseAlice();
+      const aliceRes = await alice;
+      return { aliceRes, bobRes };
+    }
+
+    afterEach(() => {
+      createIsolatedAuthClient.mockReset();
+      // Restore the default factory from supabaseMock for later tests.
+      createIsolatedAuthClient.mockImplementation(defaultIsolatedClientFactory);
+    });
+
+    it('each user gets back their own session', async () => {
+      const created: unknown[] = [];
+      const { aliceRes, bobRes } = await interleavedRefreshes((gates, onCall) => {
+        const client = makeStatefulClient(gates, onCall);
+        created.push(client);
+        return client;
+      });
+
+      expect(created).toHaveLength(2);
+      expect(created[0]).not.toBe(created[1]);
+
+      expect(aliceRes.status).toBe(200);
+      expect(aliceRes.body.session.access_token).toBe('tok-alice');
+      expect(aliceRes.body.session.refresh_token).toBe('ref-alice-2');
+      expect(aliceRes.body.session.user.id).toBe('user-alice');
+
+      expect(bobRes.status).toBe(200);
+      expect(bobRes.body.session.access_token).toBe('tok-bob');
+      expect(bobRes.body.session.refresh_token).toBe('ref-bob-2');
+      expect(bobRes.body.session.user.id).toBe('user-bob');
+    });
+
+    it('control: the same interleaving leaks a session when one client is shared', async () => {
+      // Proves the harness above actually detects the bug: handing both
+      // requests the same stateful client (what the old shared-supabaseAuth
+      // code did) gives Alice Bob's session.
+      let shared: unknown = null;
+      const { aliceRes, bobRes } = await interleavedRefreshes((gates, onCall) => {
+        if (!shared) shared = makeStatefulClient(gates, onCall);
+        return shared;
+      });
+
+      expect(bobRes.body.session.access_token).toBe('tok-bob');
+      expect(aliceRes.body.session.access_token).toBe('tok-bob');
+      expect(aliceRes.body.session.user.id).toBe('user-bob');
+    });
+  });
+
+  it('/login signs in on a fresh isolated client per request', async () => {
+    const ok = {
+      data: { session: { access_token: 'tok', refresh_token: 'ref' }, user: { id: 'user-1', email: 'a@b.com' } },
+      error: null,
+    };
+    mockIsolatedSignIn.mockResolvedValueOnce(ok).mockResolvedValueOnce(ok);
+
+    await request(app).post('/api/v1/auth/login').send({ email: 'a@b.com', password: 'password123' });
+    await request(app).post('/api/v1/auth/login').send({ email: 'a@b.com', password: 'password123' });
+
+    expect(isolatedClients).toHaveLength(2);
+    expect(isolatedClients[0]).not.toBe(isolatedClients[1]);
+    for (const client of isolatedClients) {
+      expect(client.auth.signInWithPassword).toHaveBeenCalledTimes(1);
+      expect(client.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'a@b.com', password: 'password123' });
+    }
+  });
+
+  it('/signup signs up on a fresh isolated client per request', async () => {
+    const ok = {
+      data: { user: { id: 'user-1', email: 'new@example.com', identities: [{ id: 'i' }] }, session: null },
+      error: null,
+    };
+    mockSignUp.mockResolvedValueOnce(ok).mockResolvedValueOnce(ok);
+
+    await request(app).post('/api/v1/auth/signup').send({ email: 'new@example.com', password: 'password123', name: 'N' });
+    await request(app).post('/api/v1/auth/signup').send({ email: 'new@example.com', password: 'password123', name: 'N' });
+
+    expect(isolatedClients).toHaveLength(2);
+    expect(isolatedClients[0]).not.toBe(isolatedClients[1]);
+    for (const client of isolatedClients) {
+      expect(client.auth.signUp).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
@@ -355,7 +551,7 @@ describe('POST /api/v1/auth/logout', () => {
     expect(isolatedClients[0].auth.refreshSession).toHaveBeenCalledTimes(1);
     expect(isolatedClients[0].auth.admin.signOut).toHaveBeenCalledWith('fresh-access');
     expect(mockAdminSignOut).toHaveBeenCalledTimes(1);
-    expect(mockRefreshSession).not.toHaveBeenCalled();
+    expect(mockIsolatedRefreshSession).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('access token rejected'));
     expect(errorSpy).not.toHaveBeenCalled();
   });
@@ -866,7 +1062,7 @@ describe('POST /api/v1/auth/change-password', () => {
     for (const client of isolatedClients) {
       expect(client.auth.signInWithPassword).toHaveBeenCalledTimes(1);
     }
-    expect(mockSignInWithPassword).not.toHaveBeenCalled();
+    expect(mockIsolatedSignIn).toHaveBeenCalledTimes(2);
   });
 
   it("revokes only the verification session (scope 'local'), not the user's other sessions", async () => {
@@ -1120,7 +1316,7 @@ describe('displayNameOf / sessionPayload', () => {
 
 describe('POST /api/v1/auth/refresh — display name', () => {
   it('includes the display name so a restored session knows it', async () => {
-    mockRefreshSession.mockResolvedValue({
+    mockIsolatedRefreshSession.mockResolvedValueOnce({
       data: {
         session: { access_token: 'new-tok', refresh_token: 'new-ref' },
         user: { id: 'user-1', email: 'a@b.com', user_metadata: { name: 'Adrian Schtivelmager' } },
@@ -1180,7 +1376,7 @@ describe('POST /api/v1/auth/verify-signup', () => {
     mockVerifySuccess();
     const verify = await request(app).post('/api/v1/auth/verify-signup').send(validBody);
 
-    mockSignInWithPassword.mockResolvedValueOnce({ data: { session: confirmedSession, user: confirmedUser }, error: null });
+    mockIsolatedSignIn.mockResolvedValueOnce({ data: { session: confirmedSession, user: confirmedUser }, error: null });
     const login = await request(app).post('/api/v1/auth/login').send({ email: 'new@example.com', password: 'password123' });
 
     expect(verify.body).toEqual(login.body);
@@ -1211,7 +1407,7 @@ describe('POST /api/v1/auth/verify-signup', () => {
     for (const client of isolatedClients) {
       expect(client.auth.verifyOtp).toHaveBeenCalledTimes(1);
     }
-    expect(mockSignInWithPassword).not.toHaveBeenCalled();
+    expect(mockIsolatedSignIn).not.toHaveBeenCalled();
   });
 
   it('trims the email and code', async () => {

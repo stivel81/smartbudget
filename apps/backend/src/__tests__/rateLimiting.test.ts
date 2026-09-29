@@ -11,6 +11,7 @@ jest.mock('@smartbudget/shared/lib/supabase', () => ({
 
 jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
   supabaseAuth: require('../testUtils/supabaseMock').supabaseAuth,
+  createIsolatedAuthClient: require('../testUtils/supabaseMock').createIsolatedAuthClient,
 }));
 
 jest.mock('../services/claude', () => ({

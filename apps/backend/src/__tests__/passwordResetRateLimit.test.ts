@@ -99,7 +99,7 @@ describe('Password reset rate limiting', () => {
     warnSpy.mockRestore();
     expect(reset.status).toBe(400);
 
-    mock.mockSignInWithPassword.mockResolvedValueOnce({
+    mock.mockIsolatedSignIn.mockResolvedValueOnce({
       data: { session: null, user: null },
       error: { message: 'Invalid login credentials', status: 400 },
     });

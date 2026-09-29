@@ -83,36 +83,38 @@ export const supabase = {
   },
 };
 
-// requireAuth verifies bearer tokens, and routes/auth.ts signs up/in/out,
-// via a separate client instance (see packages/shared/lib/supabaseAuth.ts)
-// — mocked here too so routes under test resolve the same way regardless
-// of which client they use. Auth tests configure these per-test with
-// mockResolvedValueOnce rather than the queue pattern above.
-export const mockSignUp = jest.fn();
-export const mockSignInWithPassword = jest.fn();
-export const mockRefreshSession = jest.fn();
+// requireAuth verifies bearer tokens, and routes/auth.ts sends emails and
+// revokes sessions, via a separate client instance (see
+// packages/shared/lib/supabaseAuth.ts) — mocked here too so routes under
+// test resolve the same way regardless of which client they use. Auth tests
+// configure these per-test with mockResolvedValueOnce rather than the queue
+// pattern above.
 export const mockAdminSignOut = jest.fn();
 export const mockResetPasswordForEmail = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
 export const mockResend = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
 
-// Password reset runs verifyOtp + updateUser on a fresh per-request client
-// (createIsolatedAuthClient). Each call here returns a *new* object whose
-// methods delegate to these shared mocks, and records it in
-// isolatedClients so tests can assert one client per request and that
-// updateUser ran on the same instance as verifyOtp.
+// Every call that stores a session on the client (signUp, login's
+// signInWithPassword, refreshSession, verifyOtp + updateUser) runs on a
+// fresh per-request client (createIsolatedAuthClient). Each call here
+// returns a *new* object whose methods delegate to these shared mocks, and
+// records it in isolatedClients so tests can assert one client per request
+// and that follow-up calls ran on the same instance.
+export const mockSignUp = jest.fn();
 export const mockVerifyOtp = jest.fn();
 export const mockUpdateUser = jest.fn();
-// Change password verifies the current password with signInWithPassword on
-// an isolated client — deliberately a different mock from the shared
-// client's mockSignInWithPassword, so tests can prove which client ran it.
+// /login, and change-password's current-password check, both sign in on an
+// isolated client.
 export const mockIsolatedSignIn = jest.fn();
 export const mockIsolatedAdminSignOut = jest.fn(async (..._args: unknown[]): Promise<any> => ({ data: {}, error: null }));
-// Logout falls back to exchanging the refresh token on an isolated client
-// (then signing that fresh session out) when the access token has expired.
+// /refresh exchanges the refresh token on an isolated client; so does
+// logout's fallback (then signing that fresh session out) when the access
+// token has expired.
 export const mockIsolatedRefreshSession = jest.fn();
 export const isolatedClients: any[] = [];
-export const createIsolatedAuthClient = jest.fn(() => {
+// Exported so a test that swaps in its own implementation can restore it.
+export function defaultIsolatedClientFactory(): any {
   const client: any = { auth: {} };
+  client.auth.signUp = jest.fn((...args: unknown[]) => mockSignUp(...args));
   client.auth.verifyOtp = jest.fn((...args: unknown[]) => mockVerifyOtp(...args));
   client.auth.updateUser = jest.fn((...args: unknown[]) => mockUpdateUser(...args));
   client.auth.signInWithPassword = jest.fn((...args: unknown[]) => mockIsolatedSignIn(...args));
@@ -120,14 +122,16 @@ export const createIsolatedAuthClient = jest.fn(() => {
   client.auth.admin = { signOut: jest.fn((...args: unknown[]) => mockIsolatedAdminSignOut(...args)) };
   isolatedClients.push(client);
   return client;
-});
+}
+export const createIsolatedAuthClient = jest.fn(defaultIsolatedClientFactory);
 
+// The shared client deliberately has NO session-storing methods (signUp,
+// signInWithPassword, refreshSession, verifyOtp, updateUser, setSession, ...):
+// a route that regresses to calling one of them on the shared client throws
+// here and the route's tests fail, instead of silently passing.
 export const supabaseAuth = {
   auth: {
     getUser: mockGetUser,
-    signUp: mockSignUp,
-    signInWithPassword: mockSignInWithPassword,
-    refreshSession: mockRefreshSession,
     resetPasswordForEmail: mockResetPasswordForEmail,
     resend: mockResend,
     admin: { signOut: mockAdminSignOut },
