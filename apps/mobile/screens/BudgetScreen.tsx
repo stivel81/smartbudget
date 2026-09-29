@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, isSignedIn } from '../lib/auth';
 import { getBudgets, getReceipts, upsertBudget, Budget, Receipt, RECEIPT_CATEGORIES } from '../lib/api';
 import { COLORS, CATEGORY_META, budgetBarColor, ALERT_THRESHOLD_PCT, DANGER_THRESHOLD_PCT } from '../lib/theme';
 import {
@@ -108,7 +108,10 @@ export default function BudgetScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
   // Signed in or not — not the token itself: lib/api gets (and renews) the
   // token on its own, and a renewal must not re-trigger the loads below.
-  const hasSession = auth.accessToken !== null;
+  // hasAccessToken flips false -> true only when a launch restore that
+  // failed transiently finally renews: load again then.
+  const hasSession = isSignedIn(auth);
+  const hasAccessToken = auth.accessToken !== null;
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +150,7 @@ export default function BudgetScreen(): React.ReactElement {
       return () => {
         cancelled = true;
       };
-    }, [hasSession])
+    }, [hasSession, hasAccessToken])
   );
 
   const now = new Date();

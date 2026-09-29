@@ -62,6 +62,7 @@ function receipt(
   };
 }
 
+/** `null` renders signed out (no access or refresh token). */
 function renderBudget(accessToken: string | null = 'test-token') {
   return render(
     <AuthContext.Provider
@@ -70,7 +71,7 @@ function renderBudget(accessToken: string | null = 'test-token') {
         setIsAuthenticated: () => {},
         accessToken,
         setAccessToken: () => {},
-        refreshToken: 'test-refresh-token',
+        refreshToken: accessToken === null ? null : 'test-refresh-token',
         setRefreshToken: () => {},
         userEmail: 'test@example.com',
         setUserEmail: () => {},
@@ -496,7 +497,7 @@ describe('BudgetScreen', () => {
     });
   });
 
-  describe('without an access token', () => {
+  describe('when signed out', () => {
     it('does not fetch and does not save', async () => {
       renderBudget(null);
 

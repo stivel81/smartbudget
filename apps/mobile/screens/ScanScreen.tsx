@@ -19,7 +19,7 @@ import { setStatusBarStyle } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { scanReceipt, updateReceipt, deleteReceipt } from '../lib/api';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, isSignedIn } from '../lib/auth';
 import { textDirectionStyle } from '../lib/rtl';
 import { COLORS, FONT_FAMILY, RADIUS, SPACING } from '../lib/theme';
 import {
@@ -153,7 +153,7 @@ export default function ScanScreen(): React.ReactElement {
   };
 
   const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
-    if (!auth.accessToken) {
+    if (!isSignedIn(auth)) {
       Alert.alert('Not signed in', 'Please sign in again to scan a receipt.');
       return;
     }
@@ -216,7 +216,7 @@ export default function ScanScreen(): React.ReactElement {
 
   // Discard: the scan already persisted the receipt, so cancelling deletes it.
   const handleCancel = async () => {
-    if (!result || !auth.accessToken) {
+    if (!result || !isSignedIn(auth)) {
       handleDismiss();
       return;
     }
@@ -234,7 +234,7 @@ export default function ScanScreen(): React.ReactElement {
 
   // Save: the receipt is already stored; only PATCH fields the user edited.
   const handleConfirm = async () => {
-    if (!result || !auth.accessToken) {
+    if (!result || !isSignedIn(auth)) {
       handleDismiss();
       return;
     }

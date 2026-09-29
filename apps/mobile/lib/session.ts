@@ -1,4 +1,5 @@
-// Session manager: keeps the access token valid while the app runs.
+// Session manager: keeps the access token valid while the app runs, and
+// restores the persisted session on launch.
 //
 // Supabase access tokens live ~1h; the refresh token is single-use (every
 // refresh rotates it). This module owns "the current tokens" for API calls
@@ -28,7 +29,13 @@ export interface SessionPayload {
 }
 
 export interface SessionTokens {
-  accessToken: string;
+  /**
+   * Null while the session has no usable access token yet: after a launch
+   * restore whose first renewal failed transiently (offline, 429, 5xx). The
+   * session is then due, so the next getAccessToken / foreground / retry
+   * timer renews it before anything is sent.
+   */
+  accessToken: string | null;
   refreshToken: string;
   /** When the access token expires, epoch ms on this device's clock; null when unknown. */
   expiresAt: number | null;
@@ -83,6 +90,18 @@ export function isDeadSessionError(err: unknown): boolean {
   return code === 401 || code === 400;
 }
 
+/**
+ * How a launch restore ended:
+ *  - 'restored': renewed; onRefreshed has fired with the new session.
+ *  - 'expired':  the stored refresh token is dead; onExpired has fired.
+ *  - 'pending':  a transient failure (offline, 429, 5xx). The stored session
+ *                is kept (access token null) and renewal is retried by the
+ *                backoff timer, on foreground, and on the next API call.
+ *  - 'superseded': the manager was disposed or given another session
+ *                meanwhile; the caller should ignore this restore.
+ */
+export type RestoreOutcome = 'restored' | 'expired' | 'pending' | 'superseded';
+
 export interface SessionManagerOptions {
   /** Exchange a refresh token for a new session (POST /auth/refresh). Rejects with ApiError on failure. */
   refresh: (refreshToken: string) => Promise<SessionPayload>;
@@ -97,9 +116,20 @@ export interface SessionManagerOptions {
 export interface SessionManager {
   /** Track these tokens (after sign-in / restore / a React state change), or none (sign-out). */
   setSession(tokens: SessionTokens | null): void;
+  /**
+   * Launch: adopt the persisted refresh token (the access token is never
+   * persisted) and renew it right away through the same single-flight
+   * refresh and dead-vs-transient classification as every other renewal.
+   */
+  restore(refreshToken: string): Promise<RestoreOutcome>;
   /** The current session's tokens, or null when signed out. */
   getSession(): SessionTokens | null;
-  /** A usable access token: renewed first when it is due. Null when signed out or the session died. */
+  /**
+   * A usable access token: renewed first when it is due. Null when signed out
+   * or the session died. Rejects with the refresh error when renewal failed
+   * transiently and there is no access token to fall back on (a restored
+   * session whose renewal hasn't succeeded yet) — retryable, session kept.
+   */
   getAccessToken(): Promise<string | null>;
   /**
    * `rejectedToken` got a 401. Renew (single-flight) unless the session has
@@ -129,6 +159,9 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Consecutive transient refresh failures, for the retry backoff.
   let failures = 0;
+  // Generation whose refresh token the backend rejected (so restore can tell
+  // "dead" from "superseded": both leave runRefresh resolving null).
+  let expiredGeneration: number | null = null;
 
   const clearTimer = () => {
     if (timer !== null) {
@@ -137,7 +170,9 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     }
   };
 
-  const isDue = () => current !== null && current.dueAt !== null && now() >= current.dueAt;
+  // No access token at all (restore pending) counts as due.
+  const isDue = () =>
+    current !== null && (current.accessToken === null || (current.dueAt !== null && now() >= current.dueAt));
 
   const armTimer = (delay: number) => {
     clearTimer();
@@ -178,6 +213,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     } catch (err) {
       if (gen !== generation) return current?.accessToken ?? null;
       if (isDeadSessionError(err)) {
+        expiredGeneration = gen;
         forget();
         options.onExpired();
         return null;
@@ -207,7 +243,27 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     return flight;
   }
 
+  const replace = (tokens: SessionTokens) => {
+    generation += 1;
+    inFlight = null;
+    failures = 0;
+    track(tokens);
+  };
+
   return {
+    async restore(refreshToken) {
+      replace({ accessToken: null, refreshToken, expiresAt: null });
+      const gen = generation;
+      try {
+        const token = await refreshNow();
+        if (gen === generation && token !== null) return 'restored';
+        return expiredGeneration === gen ? 'expired' : 'superseded';
+      } catch {
+        // Transient: runRefresh kept the session and armed the backoff retry.
+        return gen === generation ? 'pending' : 'superseded';
+      }
+    },
+
     setSession(tokens) {
       if (!tokens) {
         if (current) forget();
@@ -219,12 +275,9 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         current.refreshToken === tokens.refreshToken &&
         current.expiresAt === tokens.expiresAt
       ) {
-        return; // Already tracking these (e.g. App echoing back our own refresh).
+        return; // Already tracking these (e.g. App echoing back our own refresh or restore).
       }
-      generation += 1;
-      inFlight = null;
-      failures = 0;
-      track(tokens);
+      replace(tokens);
     },
 
     getSession() {
@@ -237,9 +290,12 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       if (isDue()) {
         try {
           return await refreshNow();
-        } catch {
+        } catch (err) {
           // Transient failure: fall back to the current token and let the
-          // backend decide (it may still be valid for up to a minute).
+          // backend decide (it may still be valid for up to a minute). With
+          // no token yet (restore pending), surface the retryable error
+          // rather than null, which would read as "signed out".
+          if (current && current.accessToken === null) throw err;
           return current?.accessToken ?? null;
         }
       }
@@ -248,7 +304,9 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
 
     refreshAfterUnauthorized(rejectedToken) {
       if (!current) return Promise.resolve(null);
-      if (current.accessToken !== rejectedToken) return Promise.resolve(current.accessToken);
+      if (current.accessToken !== null && current.accessToken !== rejectedToken) {
+        return Promise.resolve(current.accessToken);
+      }
       return refreshNow();
     },
 

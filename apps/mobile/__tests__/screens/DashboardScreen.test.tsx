@@ -38,9 +38,10 @@ const NOW = new Date(2026, 0, 22, 9, 0, 0);
 function renderDashboard(
   {
     accessToken = 'test-token',
+    refreshToken = 'test-refresh-token',
     userEmail = 'test@example.com',
     userName = null,
-  }: { accessToken?: string | null; userEmail?: string | null; userName?: string | null } = {}
+  }: { accessToken?: string | null; refreshToken?: string | null; userEmail?: string | null; userName?: string | null } = {}
 ) {
   return render(
     <AuthContext.Provider
@@ -49,7 +50,7 @@ function renderDashboard(
         setIsAuthenticated: () => {},
         accessToken,
         setAccessToken: () => {},
-        refreshToken: 'test-refresh-token',
+        refreshToken,
         setRefreshToken: () => {},
         userEmail,
         setUserEmail: () => {},
@@ -654,8 +655,8 @@ describe('DashboardScreen', () => {
     });
   });
 
-  it('does not fetch without an access token', () => {
-    renderDashboard({ accessToken: null });
+  it('does not fetch when signed out', () => {
+    renderDashboard({ accessToken: null, refreshToken: null });
 
     expect(mockGetReceipts).not.toHaveBeenCalled();
     expect(mockGetBudgets).not.toHaveBeenCalled();

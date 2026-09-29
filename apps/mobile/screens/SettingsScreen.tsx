@@ -16,7 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import ScreenHeader from '../components/ScreenHeader';
 import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, isSignedIn } from '../lib/auth';
 import { changePassword } from '../lib/api';
 import { apiErrorMessage } from '../lib/errors';
 import { validatePasswordChange } from '../lib/validation';
@@ -96,7 +96,7 @@ export default function SettingsScreen(): React.ReactElement {
       setError(validationError);
       return;
     }
-    if (!auth.accessToken) {
+    if (!isSignedIn(auth)) {
       setError(SIGNED_OUT_ERROR);
       return;
     }

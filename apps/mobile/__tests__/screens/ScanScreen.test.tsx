@@ -500,8 +500,8 @@ describe('ScanScreen — scanning', () => {
     expect(mockScanReceipt).not.toHaveBeenCalled();
   });
 
-  it('asks the user to sign in again when there is no access token', async () => {
-    renderScan({ accessToken: null });
+  it('asks the user to sign in again when signed out', async () => {
+    renderScan({ accessToken: null, refreshToken: null });
 
     fireEvent.press(screen.getByTestId('scan-gallery-button'));
 
@@ -663,7 +663,7 @@ describe('ScanScreen — result card actions', () => {
     const { rerenderWith } = renderScan();
     await scanFromGallery();
 
-    rerenderWith({ accessToken: null });
+    rerenderWith({ accessToken: null, refreshToken: null });
     fireEvent.changeText(screen.getByTestId('scan-total-input'), '55');
     fireEvent.press(screen.getByTestId('scan-save-button'));
 
@@ -744,7 +744,7 @@ describe('ScanScreen — top-bar Cancel (discard)', () => {
     const { rerenderWith } = renderScan();
     await scanFromGallery();
 
-    rerenderWith({ accessToken: null });
+    rerenderWith({ accessToken: null, refreshToken: null });
     fireEvent.press(screen.getByTestId('scan-cancel-button'));
 
     await waitFor(() => expect(screen.queryByTestId('scan-result-card')).toBeNull());

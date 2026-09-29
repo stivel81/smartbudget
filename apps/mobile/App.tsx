@@ -14,7 +14,7 @@ import {
 } from './lib/api';
 import { COLORS } from './lib/theme';
 import { AuthContext } from './lib/auth';
-import { createSessionManager, sessionExpiresAtMs, SessionManager, SessionPayload } from './lib/session';
+import { createSessionManager, SessionManager, SessionPayload } from './lib/session';
 import type { AuthStackParamList, SignedInStackParamList } from './lib/navigation';
 
 // Import screens
@@ -99,8 +99,9 @@ function BottomTabNavigator() {
 // Mobile never talks to Supabase directly — access tokens are exchanged
 // for a new session via POST /api/v1/auth/refresh (see lib/api.ts). Only
 // the long-lived refresh token (and email, display name) are persisted; the access
-// token lives in memory only and is re-derived by refreshing on launch,
-// so a session restored from storage is never stale.
+// token lives in memory only and is re-derived by refreshing on launch
+// (or, when that first refresh fails transiently, as soon as renewal
+// succeeds — see the restore effect).
 const STORAGE_KEY_REFRESH_TOKEN = '@smartbudget/refreshToken';
 const STORAGE_KEY_EMAIL = '@smartbudget/userEmail';
 const STORAGE_KEY_NAME = '@smartbudget/userName';
@@ -168,39 +169,61 @@ export default function App() {
   // effect: those all run before any passive effect, so a screen's first
   // load (useFocusEffect, a passive effect in a child — which would run
   // before this App's own passive effects) already finds the session here.
+  // The refresh token is what makes a session: after a launch restore that
+  // failed transiently the access token is still null (the manager renews
+  // it before use).
   useLayoutEffect(() => {
-    sessionManager.setSession(
-      accessToken && refreshToken ? { accessToken, refreshToken, expiresAt } : null
-    );
+    sessionManager.setSession(refreshToken ? { accessToken, refreshToken, expiresAt } : null);
   }, [sessionManager, accessToken, refreshToken, expiresAt]);
 
   // Restore a persisted session once on launch by exchanging the stored
   // refresh token for a fresh access token, so the app doesn't drop back
-  // to the login screen every time it's closed and reopened.
+  // to the login screen every time it's closed and reopened. The manager
+  // renews it, so launch uses the same dead-vs-transient rule as every other
+  // renewal: only a rejected refresh token (401) signs out (onExpired: Login
+  // with "session expired"); offline, 429 and 5xx keep the stored session
+  // and the app opens signed in while renewal is retried (backoff timer,
+  // next foreground, next API call).
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const storedRefreshToken = await AsyncStorage.getItem(STORAGE_KEY_REFRESH_TOKEN);
-        if (!storedRefreshToken) return;
+        const [storedRefreshToken, storedEmail, storedName] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEY_REFRESH_TOKEN),
+          AsyncStorage.getItem(STORAGE_KEY_EMAIL),
+          AsyncStorage.getItem(STORAGE_KEY_NAME),
+        ]);
+        if (!storedRefreshToken || cancelled) return;
 
-        const { session } = await refreshSessionApi(storedRefreshToken);
-        setAccessToken(session.access_token);
-        setRefreshToken(session.refresh_token);
-        setExpiresAt(sessionExpiresAtMs(session));
-        setUserEmail(session.user.email);
-        // The refreshed session carries the current name; an older backend
-        // doesn't send one, so fall back to the name persisted last time.
-        setUserName(session.user.name ?? (await AsyncStorage.getItem(STORAGE_KEY_NAME)));
-        setIsAuthenticated(true);
+        // Shown until a renewal brings the current values (onRefreshed
+        // overrides the email, and the name when the backend sends one).
+        setUserEmail(storedEmail);
+        setUserName(storedName);
+
+        const outcome = await sessionManager.restore(storedRefreshToken);
+        if (cancelled) return;
+        if (outcome === 'restored') {
+          // onRefreshed has stored the new tokens.
+          setIsAuthenticated(true);
+        } else if (outcome === 'pending') {
+          // Keep the stored session; the manager already tracks it.
+          setRefreshToken(storedRefreshToken);
+          setIsAuthenticated(true);
+        } else if (outcome === 'expired') {
+          // onExpired has signed out and set the Login notice; drop what was
+          // persisted so later launches don't retry it.
+          await AsyncStorage.multiRemove([STORAGE_KEY_REFRESH_TOKEN, STORAGE_KEY_EMAIL, STORAGE_KEY_NAME]);
+        }
       } catch {
-        // Stored refresh token is invalid/expired/revoked — stay logged
-        // out and clear it so future launches don't keep retrying it.
-        await AsyncStorage.multiRemove([STORAGE_KEY_REFRESH_TOKEN, STORAGE_KEY_EMAIL, STORAGE_KEY_NAME]);
+        // Storage unreadable: nothing to restore, stay on Login.
       } finally {
-        setIsRestoring(false);
+        if (!cancelled) setIsRestoring(false);
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionManager]);
 
   // Keep storage in sync with auth state. Skipped until the initial restore
   // finishes, so it can't race and immediately erase what was just loaded.

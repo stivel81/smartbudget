@@ -247,6 +247,18 @@ describe('lib/api', () => {
         code: 401,
       });
     });
+
+    it.each([401, 429, 502])('keeps the HTTP status (%i) when the error body is not JSON', async (status) => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: false,
+        status,
+        json: async () => {
+          throw new SyntaxError('Unexpected token <');
+        },
+      }) as jest.Mock;
+
+      await expect(refreshSession('r')).rejects.toEqual({ message: 'Session expired', code: status });
+    });
   });
 
   describe('signup', () => {

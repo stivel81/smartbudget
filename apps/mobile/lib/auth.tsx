@@ -52,6 +52,15 @@ export function useAuth(): AuthContextType {
 }
 
 /**
+ * Signed in or not. The refresh token is the session: the access token is
+ * null while a launch restore's first renewal is still pending (offline,
+ * 429, 5xx), and lib/api renews it before any authenticated call.
+ */
+export function isSignedIn(auth: Pick<AuthContextType, 'refreshToken'>): boolean {
+  return auth.refreshToken !== null;
+}
+
+/**
  * Sign in with a session from the backend. Flipping isAuthenticated makes
  * App.tsx swap the auth stack for Main — callers must not navigate manually
  * (Main isn't registered until that re-render).

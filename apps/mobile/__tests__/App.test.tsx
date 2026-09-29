@@ -564,11 +564,12 @@ describe('App session renewal (real navigator)', () => {
    * Backend fake: /refresh answers from `refreshReplies` in order; data
    * routes answer 200 only for `validToken()` and 401 otherwise.
    */
-  function fakeBackend(refreshReplies: Reply[], validToken: () => string) {
+  function fakeBackend(refreshReplies: (Reply | Error)[], validToken: () => string) {
     const refreshQueue = [...refreshReplies];
     global.fetch = jest.fn((url: string, init: any = {}) => {
       if (url.includes('/api/v1/auth/refresh')) {
         const reply = refreshQueue.shift();
+        if (reply instanceof Error) return Promise.reject(reply); // fetch itself failed (offline)
         return reply ? Promise.resolve(reply) : Promise.reject(new Error('unexpected refresh'));
       }
       if (url.includes('/api/v1/auth/logout')) return Promise.resolve(okJson({ message: 'Signed out successfully' }));
@@ -711,6 +712,115 @@ describe('App session renewal (real navigator)', () => {
 
     unmount();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  describe('launch restore', () => {
+    const rateLimited = () => errJson(429, { error: 'Too many requests, please try again later.' });
+    const serverError = () => errJson(500, { error: 'Internal server error' });
+    const offline = () => new TypeError('Network request failed');
+
+    async function storeSession() {
+      await AsyncStorage.setItem('@smartbudget/refreshToken', 'stored-ref');
+      await AsyncStorage.setItem('@smartbudget/userEmail', 'a@b.com');
+      await AsyncStorage.setItem('@smartbudget/userName', 'Ada Lovelace');
+    }
+
+    function captureAppState() {
+      const handler: { current?: (state: string) => void } = {};
+      jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, h: (s: string) => void) => {
+        handler.current = h;
+        return { remove: jest.fn() };
+      }) as any);
+      return handler;
+    }
+
+    it('a dead stored refresh token (401) lands on Login with the session-expired message and clears storage', async () => {
+      fakeBackend([errJson(401, { error: 'Invalid or expired refresh token' })], () => 'acc-1');
+      await storeSession();
+
+      render(<App />);
+
+      await waitFor(() => expect(screen.getByTestId('login-session-notice')).toBeTruthy());
+      expect(screen.getByTestId('login-session-notice')).toHaveTextContent('Your session expired, please sign in again');
+      expect(screen.getByTestId('login-email-input')).toBeTruthy();
+      await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());
+      expect(await AsyncStorage.getItem('@smartbudget/userEmail')).toBeNull();
+      expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull();
+      expect(calls('/auth/refresh')).toHaveLength(1);
+    });
+
+    it.each([
+      ['rate limited (429)', rateLimited, 'Too many requests, please try again later.'],
+      ['server error (5xx)', serverError, 'Internal server error'],
+      ['offline (network error)', offline, 'Network request failed'],
+    ])('a temporary failure (%s) keeps the stored session: the app opens signed in, never on Login', async (_label, fail, message) => {
+      // Launch restore fails, and so does the Dashboard's own renewal attempt.
+      fakeBackend([fail(), fail()], () => 'acc-1');
+      await storeSession();
+
+      render(<App />);
+
+      await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
+      expect(screen.queryByTestId('login-email-input')).toBeNull();
+      expect(screen.queryByTestId('login-session-notice')).toBeNull();
+      // Nothing was sent without a token; both renewals used the stored (unconsumed) refresh token.
+      expect(calls('/api/v1/receipts')).toHaveLength(0);
+      expect(calls('/auth/refresh').map(([, init]) => JSON.parse(init.body))).toEqual([
+        { refresh_token: 'stored-ref' },
+        { refresh_token: 'stored-ref' },
+      ]);
+      expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('stored-ref');
+      expect(await AsyncStorage.getItem('@smartbudget/userEmail')).toBe('a@b.com');
+      expect(await AsyncStorage.getItem('@smartbudget/userName')).toBe('Ada Lovelace');
+    });
+
+    it('after a temporary failure, the next API call renews and loads normally', async () => {
+      fakeBackend([rateLimited(), okJson(sessionBody(1))], () => 'acc-1');
+      await storeSession();
+
+      render(<App />);
+
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(screen.queryByTestId('login-email-input')).toBeNull();
+      expect(calls('/auth/refresh')).toHaveLength(2);
+      await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('ref-1'));
+    });
+
+    it('after a temporary failure, returning to the foreground renews, and the Dashboard loads by itself', async () => {
+      const appState = captureAppState();
+      fakeBackend([offline(), offline(), okJson(sessionBody(1))], () => 'acc-1');
+      await storeSession();
+
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('Network request failed')).toBeTruthy());
+      expect(calls('/api/v1/receipts')).toHaveLength(0);
+
+      await act(async () => {
+        appState.current!('active');
+      });
+
+      await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
+      expect(calls('/auth/refresh')).toHaveLength(3);
+      expect(calls('/api/v1/receipts').at(-1)![1].headers.Authorization).toBe('Bearer acc-1');
+      await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBe('ref-1'));
+    });
+
+    it('after a temporary failure, a later renewal that finds the token dead goes to Login with the message', async () => {
+      const appState = captureAppState();
+      fakeBackend([rateLimited(), rateLimited(), errJson(401, { error: 'Invalid or expired refresh token' })], () => 'acc-1');
+      await storeSession();
+
+      render(<App />);
+      await waitFor(() => expect(screen.getByText('Too many requests, please try again later.')).toBeTruthy());
+
+      await act(async () => {
+        appState.current!('active');
+      });
+
+      await waitFor(() => expect(screen.getByTestId('login-session-notice')).toBeTruthy());
+      expect(screen.getByTestId('login-session-notice')).toHaveTextContent('Your session expired, please sign in again');
+      await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());
+    });
   });
 
   it('sign-out sends the refresh token too, so the backend can revoke an expired session', async () => {

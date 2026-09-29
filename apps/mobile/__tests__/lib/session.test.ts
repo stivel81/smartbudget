@@ -673,6 +673,161 @@ describe('createSessionManager', () => {
     });
   });
 
+  describe('launch restore', () => {
+    const transientErrors: [string, unknown][] = [
+      ['rate limited (429)', { message: 'Too many requests', code: 429 }],
+      ['server error (5xx)', { message: 'Internal server error', code: 503 }],
+      ['offline (network error)', new TypeError('Network request failed')],
+    ];
+
+    it("renews the stored refresh token right away: 'restored', onRefreshed, and the new tokens are tracked", async () => {
+      refresh.mockResolvedValueOnce(payload(1));
+      const manager = make();
+
+      await expect(manager.restore('stored-ref')).resolves.toBe('restored');
+
+      expect(refresh.mock.calls).toEqual([['stored-ref']]);
+      expect(onRefreshed).toHaveBeenCalledWith(payload(1), T0 + HOUR);
+      expect(onExpired).not.toHaveBeenCalled();
+      expect(manager.getSession()).toEqual({ accessToken: 'acc-1', refreshToken: 'ref-1', expiresAt: T0 + HOUR });
+      await expect(manager.getAccessToken()).resolves.toBe('acc-1');
+    });
+
+    it.each([401, 400])("a dead stored token (%i): 'expired', onExpired once, session gone, no retry", async (code) => {
+      refresh.mockRejectedValueOnce({ message: 'Invalid or expired refresh token', code });
+      const manager = make();
+
+      await expect(manager.restore('stored-ref')).resolves.toBe('expired');
+
+      expect(onExpired).toHaveBeenCalledTimes(1);
+      expect(onRefreshed).not.toHaveBeenCalled();
+      expect(manager.getSession()).toBeNull();
+      await advance(HOUR);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(transientErrors)("a temporary failure (%s): 'pending', never signs out, keeps the stored refresh token", async (_label, error) => {
+      refresh.mockRejectedValueOnce(error);
+      const manager = make();
+
+      await expect(manager.restore('stored-ref')).resolves.toBe('pending');
+
+      expect(onExpired).not.toHaveBeenCalled();
+      expect(onRefreshed).not.toHaveBeenCalled();
+      expect(manager.getSession()).toEqual({ accessToken: null, refreshToken: 'stored-ref', expiresAt: null });
+    });
+
+    it('pending: App echoing the kept session back is a no-op (no extra refresh, backoff kept)', async () => {
+      refresh.mockRejectedValueOnce({ code: 429 }).mockResolvedValueOnce(payload(1));
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      manager.setSession({ accessToken: null, refreshToken: 'stored-ref', expiresAt: null });
+      await advance(RETRY_BASE_DELAY_MS - 1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      await advance(1);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it('pending: the backoff timer retries with the same (unconsumed) token and succeeds later', async () => {
+      refresh.mockRejectedValueOnce(new TypeError('Network request failed')).mockResolvedValueOnce(payload(1));
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      await advance(RETRY_BASE_DELAY_MS);
+
+      expect(refresh.mock.calls).toEqual([['stored-ref'], ['stored-ref']]);
+      expect(onRefreshed).toHaveBeenCalledTimes(1);
+      expect(manager.getSession()?.accessToken).toBe('acc-1');
+    });
+
+    it("pending: returning to the foreground ('active') retries right away and succeeds", async () => {
+      refresh.mockRejectedValueOnce({ code: 429 }).mockResolvedValueOnce(payload(1));
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      manager.handleAppStateChange('active');
+      await flush();
+
+      expect(refresh).toHaveBeenCalledTimes(2);
+      expect(manager.getSession()?.accessToken).toBe('acc-1');
+      expect(onExpired).not.toHaveBeenCalled();
+    });
+
+    it('pending: the next getAccessToken renews first and returns the new token', async () => {
+      refresh.mockRejectedValueOnce({ code: 500 }).mockResolvedValueOnce(payload(1));
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      await expect(manager.getAccessToken()).resolves.toBe('acc-1');
+      expect(refresh.mock.calls).toEqual([['stored-ref'], ['stored-ref']]);
+    });
+
+    it('pending: a getAccessToken whose renewal fails again rejects with the retryable error (not null = "signed out")', async () => {
+      const again = { message: 'Too many requests', code: 429 };
+      refresh.mockRejectedValueOnce({ code: 429 }).mockRejectedValueOnce(again);
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      await expect(manager.getAccessToken()).rejects.toBe(again);
+      expect(onExpired).not.toHaveBeenCalled();
+      expect(manager.getSession()?.refreshToken).toBe('stored-ref');
+    });
+
+    it('pending: concurrent getAccessToken calls share one renewal', async () => {
+      const pending = deferred<SessionPayload>();
+      refresh.mockRejectedValueOnce({ code: 429 }).mockReturnValueOnce(pending.promise);
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      const waiters = [manager.getAccessToken(), manager.getAccessToken()];
+      pending.resolve(payload(1));
+
+      await expect(Promise.all(waiters)).resolves.toEqual(['acc-1', 'acc-1']);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it('pending: a later renewal that finds the token dead signs out via onExpired', async () => {
+      refresh.mockRejectedValueOnce({ code: 429 }).mockRejectedValueOnce({ code: 401 });
+      const manager = make();
+      await manager.restore('stored-ref');
+
+      manager.handleAppStateChange('active');
+      await flush();
+
+      expect(onExpired).toHaveBeenCalledTimes(1);
+      expect(manager.getSession()).toBeNull();
+    });
+
+    it("disposed mid-restore (App unmounted): 'superseded', no callbacks", async () => {
+      const pending = deferred<SessionPayload>();
+      refresh.mockReturnValueOnce(pending.promise);
+      const manager = make();
+
+      const outcome = manager.restore('stored-ref');
+      manager.dispose();
+      pending.reject({ code: 401 });
+
+      await expect(outcome).resolves.toBe('superseded');
+      expect(onExpired).not.toHaveBeenCalled();
+      expect(onRefreshed).not.toHaveBeenCalled();
+    });
+
+    it("a sign-in mid-restore wins: the late restore result is 'superseded'", async () => {
+      const pending = deferred<SessionPayload>();
+      refresh.mockReturnValueOnce(pending.promise);
+      const manager = make();
+
+      const outcome = manager.restore('stored-ref');
+      manager.setSession({ accessToken: 'acc-9', refreshToken: 'ref-9', expiresAt: T0 + HOUR });
+      pending.resolve(payload(1));
+
+      await expect(outcome).resolves.toBe('superseded');
+      expect(onRefreshed).not.toHaveBeenCalled();
+      expect(manager.getSession()?.accessToken).toBe('acc-9');
+    });
+  });
+
   it('uses Date.now by default', async () => {
     jest.useRealTimers();
     refresh.mockResolvedValueOnce(payload(1));

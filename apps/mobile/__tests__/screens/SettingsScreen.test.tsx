@@ -166,7 +166,7 @@ describe('SettingsScreen', () => {
     });
 
     it('tells a signed-out user to sign in again instead of calling the API', () => {
-      renderSettings({ accessToken: null });
+      renderSettings({ accessToken: null, refreshToken: null });
       fill('oldpassword', 'newpassword1');
       submit();
       expect(screen.getByText('Your session has ended. Please sign in again.')).toBeTruthy();

@@ -180,13 +180,10 @@ export async function refreshSession(refreshToken: string): Promise<LoginRespons
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw {
-      message: error.error || 'Session expired',
-      code: response.status,
-    } as ApiError;
-  }
+  // Always carries the HTTP status, even for a non-JSON body (proxy page,
+  // empty 502): lib/session tells a dead token (401) from a temporary
+  // failure by that code alone.
+  if (!response.ok) throw await toApiError(response, 'Session expired');
 
   return response.json();
 }

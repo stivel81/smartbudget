@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { AuthContext } from '../lib/auth';
+import { AuthContext, isSignedIn } from '../lib/auth';
 import type { MainTabParamList } from '../lib/navigation';
 import { initialsFor } from '../lib/profile';
 import { getReceipts, getReceiptImageUrl, Receipt, getBudgets, Budget, updateItemCategories } from '../lib/api';
@@ -236,7 +236,10 @@ export default function DashboardScreen(): React.ReactElement {
   const auth = useContext(AuthContext);
   // Signed in or not — not the token itself: lib/api gets (and renews) the
   // token on its own, and a renewal must not re-trigger the loads below.
-  const hasSession = auth.accessToken !== null;
+  // hasAccessToken flips false -> true only when a launch restore that
+  // failed transiently finally renews: load again then.
+  const hasSession = isSignedIn(auth);
+  const hasAccessToken = auth.accessToken !== null;
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
@@ -278,7 +281,7 @@ export default function DashboardScreen(): React.ReactElement {
       return () => {
         cancelled = true;
       };
-    }, [hasSession])
+    }, [hasSession, hasAccessToken])
   );
 
   const now = new Date();
