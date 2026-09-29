@@ -4,6 +4,7 @@ import { scanReceipt, RECEIPT_CATEGORIES } from '../services/claude';
 import { normalizeReceiptDate } from '../services/receiptDate';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
 import { findDuplicateReceipt } from '../services/duplicateReceipt';
+import { syncReceiptTransactions } from '../services/transactionSync';
 
 const router = Router();
 
@@ -59,6 +60,10 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
       console.error('Failed to save receipt:', error);
       return res.status(500).json({ error: 'Failed to save receipt', status: 500 });
     }
+
+    // Best-effort, like duplicate_of: syncReceiptTransactions never throws
+    // and logs its own failures, so the scan still returns 201.
+    await syncReceiptTransactions(req.userId!, data);
 
     // Best-effort: the scan already succeeded, so a storage failure here
     // shouldn't fail the request — the receipt just ends up without an image.
@@ -244,6 +249,10 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
     console.error('Failed to update receipt:', error);
     return res.status(500).json({ error: 'Failed to update receipt', status: 500 });
   }
+
+  // Replace this receipt's transactions from the saved raw_response.
+  // Best-effort: never throws, failures are logged, the PATCH still succeeds.
+  await syncReceiptTransactions(req.userId!, data);
 
   // Recomputed after the edit: fixing the merchant/total/date can create or
   // clear a match. Advisory only — never fails the save.

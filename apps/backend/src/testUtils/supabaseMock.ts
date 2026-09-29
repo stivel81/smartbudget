@@ -39,10 +39,11 @@ function nextStorageResult() {
 
 function makeBuilder(): any {
   const builder: any = {};
-  ['select', 'eq', 'neq', 'in', 'not', 'order', 'limit', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
+  ['select', 'eq', 'neq', 'in', 'not', 'is', 'or', 'order', 'limit', 'insert', 'update', 'upsert', 'delete'].forEach((method) => {
     builder[method] = jest.fn(() => builder);
   });
   builder.single = jest.fn(async () => nextResult());
+  builder.maybeSingle = jest.fn(async () => nextResult());
   builder.then = (resolve: (v: unknown) => void, reject?: (e: unknown) => void) => {
     Promise.resolve().then(() => resolve(nextResult())).catch(reject);
   };
@@ -74,6 +75,8 @@ export const supabase = {
     },
   },
   from: jest.fn(() => makeBuilder()),
+  // supabase.rpc(fn, args) — resolves with the next queued result, like a query.
+  rpc: jest.fn(() => makeBuilder()),
   storage: {
     from: jest.fn(() => ({
       upload: jest.fn(async () => nextStorageResult()),

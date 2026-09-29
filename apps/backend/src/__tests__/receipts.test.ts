@@ -8,6 +8,13 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
   supabaseAuth: require('../testUtils/supabaseMock').supabaseAuth,
 }));
 
+// The transactions sync (best-effort, after scan/patch) is covered in
+// receiptTransactionSync.test.ts; stubbed here so these tests' queued
+// Supabase results stay aligned with the calls they are about.
+jest.mock('../services/transactionSync', () => ({
+  syncReceiptTransactions: jest.fn(async () => true),
+}));
+
 jest.mock('../services/claude', () => ({
   scanReceipt: jest.fn(async () => ({
     extraction: {
