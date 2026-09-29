@@ -24,17 +24,19 @@ jest.mock('@smartbudget/shared/lib/supabaseAuth', () => ({
 
 type MockModule = typeof import('../testUtils/supabaseMock');
 
-// These scenarios send 100+ requests each. supertest's request(app) starts
-// a new ephemeral server per request, which under load occasionally reuses
-// a port mid-flight ("Parse Error: Expected HTTP/"); one listening server
-// per fresh app avoids that.
+// These scenarios send 100+ requests each; one listening server per fresh
+// app (rather than supertest's request(app), which starts a new ephemeral
+// server per request) keeps that cheap. It binds 127.0.0.1 explicitly — the
+// address supertest dials — so it can't land on a port another process holds
+// for IPv4 (see src/testUtils/supertestLoopback.ts, which does the same for
+// every request(app) server).
 const servers: http.Server[] = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
 });
 
-function freshApp(): { app: http.Server; mock: MockModule; authLimit: number; sessionLimit: number } {
+async function freshApp(): Promise<{ app: http.Server; mock: MockModule; authLimit: number; sessionLimit: number }> {
   let express!: Express;
   let mock!: MockModule;
   let authLimit!: number;
@@ -60,8 +62,9 @@ function freshApp(): { app: http.Server; mock: MockModule; authLimit: number; se
   });
   mock.mockAdminSignOut.mockReset();
   mock.mockAdminSignOut.mockResolvedValue({ data: null, error: null });
-  const app = http.createServer(express).listen(0);
+  const app = http.createServer(express);
   servers.push(app);
+  await new Promise<void>((resolve) => app.listen(0, '127.0.0.1', resolve));
   return { app, mock, authLimit, sessionLimit };
 }
 
@@ -85,14 +88,14 @@ afterAll(() => {
 });
 
 describe('Auth rate limits per route', () => {
-  it('limits: 10 per 15 min for login/signup, 60 per 15 min for session upkeep', () => {
-    const { authLimit, sessionLimit } = freshApp();
+  it('limits: 10 per 15 min for login/signup, 60 per 15 min for session upkeep', async () => {
+    const { authLimit, sessionLimit } = await freshApp();
     expect(authLimit).toBe(10);
     expect(sessionLimit).toBe(60);
   });
 
   it('an exhausted login bucket does not block /refresh or /logout', async () => {
-    const { app, mock, authLimit } = freshApp();
+    const { app, mock, authLimit } = await freshApp();
     await exhaust(app, mock, login, authLimit);
 
     const refreshed = await refresh(app);
@@ -104,7 +107,7 @@ describe('Auth rate limits per route', () => {
   });
 
   it('login and signup still share the 10/15min bucket', async () => {
-    const { app, mock, authLimit } = freshApp();
+    const { app, mock, authLimit } = await freshApp();
     await exhaust(app, mock, login, authLimit);
 
     mock.queueResult({ error: null });
@@ -116,7 +119,7 @@ describe('Auth rate limits per route', () => {
   });
 
   it('/refresh gets 429 only at its own threshold (60), and the blocked call never reaches Supabase', async () => {
-    const { app, mock, sessionLimit } = freshApp();
+    const { app, mock, sessionLimit } = await freshApp();
 
     await exhaust(app, mock, refresh, sessionLimit);
 
@@ -125,7 +128,7 @@ describe('Auth rate limits per route', () => {
   });
 
   it('refresh traffic does not eat into the login bucket', async () => {
-    const { app, mock, sessionLimit, authLimit } = freshApp();
+    const { app, mock, sessionLimit, authLimit } = await freshApp();
     for (let i = 0; i < sessionLimit; i++) {
       expect((await refresh(app)).status).toBe(200);
     }
@@ -137,19 +140,19 @@ describe('Auth rate limits per route', () => {
   });
 
   it('/logout has its own budget (60), separate from /refresh', async () => {
-    const { app, mock, sessionLimit } = freshApp();
+    const { app, mock, sessionLimit } = await freshApp();
 
     await exhaust(app, mock, refresh, sessionLimit);
     expect((await logout(app)).status).toBe(200);
 
-    const fresh = freshApp();
+    const fresh = await freshApp();
     await exhaust(fresh.app, fresh.mock, logout, fresh.sessionLimit);
     expect(fresh.mock.mockAdminSignOut).toHaveBeenCalledTimes(fresh.sessionLimit);
     expect((await refresh(fresh.app)).status).toBe(200);
   });
 
   it('the logout refresh-token fallback (expired access token) is rate limited the same way', async () => {
-    const { app, mock, sessionLimit } = freshApp();
+    const { app, mock, sessionLimit } = await freshApp();
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mock.mockAdminSignOut.mockResolvedValue({ data: null, error: { message: 'token is expired' } });
     mock.mockIsolatedRefreshSession.mockReset();
@@ -166,7 +169,7 @@ describe('Auth rate limits per route', () => {
   });
 
   it('password-reset routes keep their own 5/15min budget and no longer eat into login', async () => {
-    const { app, mock, authLimit } = freshApp();
+    const { app, mock, authLimit } = await freshApp();
     for (let i = 0; i < 5; i++) {
       expect((await request(app).post('/api/v1/auth/forgot-password').send({ email: 'a@b.com' })).status).toBe(200);
     }
