@@ -106,13 +106,13 @@ describe('CategoryPicker', () => {
     }
   });
 
-  it('shows the line item name as a subtitle, right-aligned when Hebrew', () => {
+  it('shows the line item name as a subtitle, start-aligned (RTL base direction) when Hebrew', () => {
     renderPicker({ subtitle: 'כללי' });
     const subtitle = screen.getByTestId('category-picker-subtitle');
     expect(subtitle.props.children).toBe('כללי');
     expect(subtitle.props.numberOfLines).toBe(1);
     expect(StyleSheet.flatten(subtitle.props.style)).toEqual(
-      expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' })
+      expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' })
     );
   });
 

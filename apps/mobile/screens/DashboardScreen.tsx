@@ -654,8 +654,9 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   // flex 1 + minWidth 0: takes the leftover width and may shrink below its
-  // text, so a long (often right-aligned Hebrew) merchant ellipsizes instead
-  // of running into the amount.
+  // text, so a long merchant ellipsizes instead of running into the amount.
+  // The name is start-aligned whatever its script (textDirectionStyle), so a
+  // Hebrew merchant sits next to the icon exactly like an English one.
   receiptInfo: {
     flex: 1,
     minWidth: 0,

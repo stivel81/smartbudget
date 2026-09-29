@@ -435,17 +435,17 @@ describe('ScanScreen — scanning', () => {
     expect(screen.getByTestId('icon-dots-horizontal')).toBeTruthy();
   });
 
-  it('right-aligns an RTL (Hebrew) merchant name on the result card', async () => {
+  it('start-aligns an RTL (Hebrew) merchant name on the result card, with an RTL base direction', async () => {
     mockScanReceipt.mockResolvedValue(scanResponse({ merchant: 'רמי לוי' }));
     renderScan();
     await scanFromGallery();
 
     expect(inputStyle('scan-merchant-input')).toEqual(
-      expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' })
+      expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' })
     );
   });
 
-  it('left-aligns a Latin merchant name and re-aligns as the user edits', async () => {
+  it('left-aligns a Latin merchant name and keeps it start-aligned as the user edits', async () => {
     renderScan();
     await scanFromGallery();
 
@@ -455,7 +455,7 @@ describe('ScanScreen — scanning', () => {
 
     fireEvent.changeText(screen.getByTestId('scan-merchant-input'), 'שופרסל');
     expect(inputStyle('scan-merchant-input')).toEqual(
-      expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' })
+      expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' })
     );
   });
 

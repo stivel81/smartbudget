@@ -105,8 +105,8 @@ describe('ReceiptItemsList', () => {
       expect(style('receipt-line-category-0').flexShrink).toBe(0);
     });
 
-    it('right-aligns a Hebrew name and left-aligns a Latin one', () => {
-      expect(style('receipt-line-name-0')).toEqual(expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' }));
+    it('start-aligns both a Hebrew and a Latin name (bidi direction follows the script)', () => {
+      expect(style('receipt-line-name-0')).toEqual(expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' }));
       expect(style('receipt-line-name-1')).toEqual(expect.objectContaining({ textAlign: 'left', writingDirection: 'ltr' }));
     });
 

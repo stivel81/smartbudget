@@ -232,38 +232,41 @@ describe('DashboardScreen', () => {
     expect(screen.getByText('Dining')).toBeTruthy();
   });
 
-  it('right-aligns a Hebrew merchant name but left-aligns an English one', async () => {
+  it.each([
+    ['Hebrew', 'רמי לוי', 'rtl'],
+    ['English', 'Rami Levy', 'ltr'],
+    ['mixed (Latin first)', 'SHUFERSAL שופרסל', 'ltr'],
+    ['mixed (Hebrew first)', 'שופרסל DEAL', 'rtl'],
+  ])('start-aligns a %s merchant name in Recent Receipts', async (_label, merchant, direction) => {
+    mockGetReceipts.mockResolvedValue({ receipts: [receipt('r1', { date: '2026-01-19', total: 350, merchant })] });
+    mockGetBudgets.mockResolvedValue({ budgets: [] });
+
+    renderDashboard();
+
+    const merchantText = await screen.findByTestId('receipt-merchant-r1');
+    expect(merchantText.props.children).toBe(merchant);
+    expect(StyleSheet.flatten(merchantText.props.style)).toMatchObject({
+      textAlign: 'left',
+      writingDirection: direction,
+    });
+  });
+
+  it('aligns Hebrew and English merchant rows identically (only the bidi direction differs)', async () => {
     mockGetReceipts.mockResolvedValue({
       receipts: [
-        {
-          id: 'r1',
-          user_id: 'u1',
-          created_at: '2026-01-01T00:00:00Z',
-          raw_response: { merchant: 'טיטניום בע"מ', total: 350, date: '2026-01-01', items: [] },
-        },
-        {
-          id: 'r2',
-          user_id: 'u1',
-          created_at: '2026-01-02T00:00:00Z',
-          raw_response: { merchant: 'Rami Levy', total: 100, date: '2026-01-02', items: [] },
-        },
+        receipt('r1', { date: '2026-01-19', total: 350, merchant: 'רמי לוי' }),
+        receipt('r2', { date: '2026-01-18', total: 100, merchant: 'Rami Levy' }),
       ],
     });
     mockGetBudgets.mockResolvedValue({ budgets: [] });
 
     renderDashboard();
+    await screen.findByTestId('receipt-merchant-r1');
 
-    const hebrewMerchant = await screen.findByText('טיטניום בע"מ');
-    expect(StyleSheet.flatten(hebrewMerchant.props.style)).toMatchObject({
-      textAlign: 'right',
-      writingDirection: 'rtl',
-    });
-
-    const englishMerchant = screen.getByText('Rami Levy');
-    expect(StyleSheet.flatten(englishMerchant.props.style)).toMatchObject({
-      textAlign: 'left',
-      writingDirection: 'ltr',
-    });
+    const { writingDirection: _h, ...hebrew } = StyleSheet.flatten(screen.getByTestId('receipt-merchant-r1').props.style);
+    const { writingDirection: _e, ...english } = StyleSheet.flatten(screen.getByTestId('receipt-merchant-r2').props.style);
+    expect(hebrew).toEqual(english);
+    expect(hebrew.textAlign).toBe('left');
   });
 
   it('category progress bar uses budgetBarColor when budget exists', async () => {
@@ -1036,12 +1039,12 @@ describe('DashboardScreen', () => {
       expect(style('receipt-info-r1')).toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
     });
 
-    it('keeps the merchant on one ellipsized line, right-aligned for Hebrew', async () => {
+    it('keeps the merchant on one ellipsized line, start-aligned (next to the icon) for Hebrew', async () => {
       await renderRow('טיטניום בע"מ');
       const merchant = screen.getByTestId('receipt-merchant-r1');
       expect(merchant.props.numberOfLines).toBe(1);
       expect(merchant.props.ellipsizeMode).toBe('tail');
-      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'right', writingDirection: 'rtl' }));
+      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' }));
     });
 
     it('keeps a fixed gap before the amount, which never shrinks', async () => {
@@ -1054,7 +1057,7 @@ describe('DashboardScreen', () => {
 
     it('left-aligns a Latin merchant with the same layout', async () => {
       await renderRow('Rami Levy');
-      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'left' }));
+      expect(style('receipt-merchant-r1')).toEqual(expect.objectContaining({ textAlign: 'left', writingDirection: 'ltr' }));
       expect(style('receipt-info-r1').minWidth).toBe(0);
     });
   });
@@ -1253,8 +1256,26 @@ describe('DashboardScreen', () => {
       );
       expect(screen.getByTestId('receipt-modal-title').props.numberOfLines).toBe(2);
       expect(StyleSheet.flatten(screen.getByTestId('receipt-modal-title').props.style)).toEqual(
-        expect.objectContaining({ textAlign: 'right' })
+        expect.objectContaining({ textAlign: 'left', writingDirection: 'rtl' })
       );
+    });
+
+    it.each([
+      ['English', 'Rami Levy', 'ltr'],
+      ['mixed', 'SHUFERSAL שופרסל', 'ltr'],
+    ])('start-aligns a %s merchant in the modal title too', async (_label, merchant, direction) => {
+      mockGetReceipts.mockResolvedValue({
+        receipts: [{ ...MODAL_RECEIPT, raw_response: { ...MODAL_RECEIPT.raw_response, merchant } }],
+      });
+      mockGetBudgets.mockResolvedValue({ budgets: [] });
+      mockGetReceiptImageUrl.mockResolvedValue('https://example.com/r1.jpg');
+      renderDashboard();
+      fireEvent.press(await screen.findByTestId('receipt-item-r1'));
+      const title = await screen.findByTestId('receipt-modal-title');
+      expect(StyleSheet.flatten(title.props.style)).toEqual(
+        expect.objectContaining({ textAlign: 'left', writingDirection: direction })
+      );
+      await waitFor(() => expect(screen.UNSAFE_getByType(Image)).toBeTruthy());
     });
   });
 });
