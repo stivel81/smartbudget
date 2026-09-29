@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, AppState } from 'react-native';
+import { Alert, Animated, AppState } from 'react-native';
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import App from '../App';
@@ -15,6 +15,22 @@ jest.mock('@expo/vector-icons', () => {
   };
   return { Feather: makeIcon(), MaterialCommunityIcons: makeIcon(), FontAwesome: makeIcon() };
 });
+
+/**
+ * Profile -> Sign Out asks for confirmation with a native Alert; press the
+ * button, then the Alert's destructive "Sign Out" choice.
+ */
+function pressSignOutAndConfirm() {
+  const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+  const call = alertSpy.mock.calls.find((c) => c[0] === 'Sign out?');
+  alertSpy.mockRestore();
+  const confirm = (call?.[2] ?? []).find((b) => b.text === 'Sign Out');
+  if (!confirm?.onPress) throw new Error('Sign-out confirmation was not shown');
+  act(() => {
+    confirm.onPress?.();
+  });
+}
 
 function mockFetch(handlers: Record<string, () => { ok: boolean; status: number; json: () => Promise<any> }>) {
   global.fetch = jest.fn((url: string) => {
@@ -466,7 +482,7 @@ describe("App user's display name", () => {
 
     fireEvent.press(screen.getByText('Profile'));
     await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    pressSignOutAndConfirm();
 
     await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
     await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/userName')).toBeNull());
@@ -680,7 +696,7 @@ describe('App session renewal (real navigator)', () => {
 
     fireEvent.press(screen.getByText('Profile'));
     await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    pressSignOutAndConfirm();
     await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
     expect(screen.queryByTestId('login-session-notice')).toBeNull();
   });
@@ -831,7 +847,7 @@ describe('App session renewal (real navigator)', () => {
     await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
     fireEvent.press(screen.getByText('Profile'));
     await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    pressSignOutAndConfirm();
 
     await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
     const [[, init]] = calls('/auth/logout');
@@ -855,7 +871,7 @@ describe('App session renewal (real navigator)', () => {
     await waitFor(() => expect(screen.getByText('No receipts yet')).toBeTruthy());
     fireEvent.press(screen.getByText('Profile'));
     await waitFor(() => expect(screen.getByTestId('profile-sign-out-button')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    pressSignOutAndConfirm();
 
     await waitFor(() => expect(screen.getByTestId('login-email-input')).toBeTruthy());
     await waitFor(async () => expect(await AsyncStorage.getItem('@smartbudget/refreshToken')).toBeNull());

@@ -171,13 +171,63 @@ describe('ProfileScreen', () => {
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
-  it('calls auth.logout() when Sign Out is pressed', async () => {
+  type AlertButton = { text?: string; style?: string; onPress?: () => void };
+
+  /** The buttons of the most recent "Sign out?" confirmation. */
+  function confirmationButtons(): AlertButton[] {
+    const call = alertSpy.mock.calls.filter((c) => c[0] === 'Sign out?').pop();
+    if (!call) throw new Error('Sign-out confirmation was not shown');
+    return call[2] as AlertButton[];
+  }
+
+  /** Press Sign Out, then the Alert's destructive "Sign Out" choice. */
+  function signOutAndConfirm() {
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    const confirm = confirmationButtons().find((b) => b.text === 'Sign Out');
+    act(() => {
+      confirm?.onPress?.();
+    });
+  }
+
+  it('asks for confirmation before signing out (Cancel + destructive Sign Out)', () => {
     const { value } = renderProfile();
 
     fireEvent.press(screen.getByTestId('profile-sign-out-button'));
 
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    const [title, message, buttons] = alertSpy.mock.calls[0];
+    expect(title).toBe('Sign out?');
+    expect(typeof message).toBe('string');
+    expect(buttons).toEqual([
+      expect.objectContaining({ text: 'Cancel', style: 'cancel' }),
+      expect.objectContaining({ text: 'Sign Out', style: 'destructive' }),
+    ]);
+    // Nothing happens until the user confirms.
+    expect(value.logout).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('profile-signing-out')).toBeNull();
+  });
+
+  it('does not sign out when the confirmation is cancelled', () => {
+    const { value } = renderProfile();
+
+    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    const cancel = confirmationButtons().find((b) => b.text === 'Cancel');
+    act(() => {
+      cancel?.onPress?.();
+    });
+
+    expect(value.logout).not.toHaveBeenCalled();
+    expect(screen.getByText('Sign Out')).toBeTruthy();
+  });
+
+  it('calls auth.logout() once Sign Out is confirmed', async () => {
+    const { value } = renderProfile();
+
+    signOutAndConfirm();
+
     await waitFor(() => expect(value.logout).toHaveBeenCalledTimes(1));
-    expect(alertSpy).not.toHaveBeenCalled();
+    // Only the confirmation alert, no error alert.
+    expect(alertSpy).toHaveBeenCalledTimes(1);
   });
 
   it('shows a spinner and disables the button while signing out', async () => {
@@ -185,7 +235,7 @@ describe('ProfileScreen', () => {
     const logout = jest.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     renderProfile({ logout });
 
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    signOutAndConfirm();
 
     expect(await screen.findByTestId('profile-signing-out')).toBeTruthy();
     expect(screen.queryByText('Sign Out')).toBeNull();
@@ -193,9 +243,10 @@ describe('ProfileScreen', () => {
       expect.objectContaining({ disabled: true })
     );
 
-    // A second press while in flight is ignored.
+    // A second press while in flight is ignored (no second confirmation either).
     fireEvent.press(screen.getByTestId('profile-sign-out-button'));
     expect(logout).toHaveBeenCalledTimes(1);
+    expect(alertSpy).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       finish();
@@ -209,7 +260,7 @@ describe('ProfileScreen', () => {
     });
     renderProfile({ logout });
 
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    signOutAndConfirm();
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to sign out', 'Network down'));
     expect(screen.getByText('Sign Out')).toBeTruthy();
@@ -222,7 +273,7 @@ describe('ProfileScreen', () => {
     const logout = jest.fn(() => Promise.reject({}));
     renderProfile({ logout });
 
-    fireEvent.press(screen.getByTestId('profile-sign-out-button'));
+    signOutAndConfirm();
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to sign out', 'Please try again.'));
   });

@@ -39,6 +39,15 @@ export default function ProfileScreen(): React.ReactElement {
   const name = auth.userName?.trim() || '';
   const initials = initialsFor(name, email);
 
+  // Sign Out asks first (native Alert); only the destructive choice signs out.
+  // The Alert buttons carry no testIDs — Maestro taps them by text.
+  const confirmSignOut = () => {
+    Alert.alert('Sign out?', 'You will need to sign in again to see your receipts.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: () => void handleSignOut() },
+    ]);
+  };
+
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
@@ -123,7 +132,7 @@ export default function ProfileScreen(): React.ReactElement {
         {/* Sign out */}
         <TouchableOpacity
           style={[styles.signOutButton, signingOut && styles.signOutButtonDisabled]}
-          onPress={handleSignOut}
+          onPress={confirmSignOut}
           disabled={signingOut}
           accessibilityRole="button"
           testID="profile-sign-out-button"
