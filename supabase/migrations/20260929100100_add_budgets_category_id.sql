@@ -73,7 +73,8 @@ $$;
 -- FK lookups when a category is deleted.
 CREATE INDEX IF NOT EXISTS budgets_category_id_idx ON public.budgets(category_id);
 
--- Keep `category` derived from category_id, and refuse a category that is
+-- Keep `category` derived from category_id (filling category_id from the
+-- name when a legacy writer omits it), and refuse a category that is
 -- neither base nor owned by the budget's user. Clients can still INSERT /
 -- UPDATE their own budgets through PostgREST (existing RLS policies), so the
 -- DB enforces this rather than trusting the API. SECURITY INVOKER: a client
@@ -87,6 +88,27 @@ AS $$
 DECLARE
   v_name TEXT;
 BEGIN
+  -- Backward compatibility: a writer that only sends the text `category`
+  -- (the backend build running before this change is deployed, older
+  -- verify scripts) gets category_id resolved from the name — base first,
+  -- then the user's own custom category, case-insensitive. Same when an
+  -- UPDATE changes only the text. No match -> category_id is NULL and the
+  -- check below rejects the row.
+  IF NEW.category IS NOT NULL AND (
+       NEW.category_id IS NULL
+       OR (TG_OP = 'UPDATE'
+           AND NEW.category IS DISTINCT FROM OLD.category
+           AND NEW.category_id IS NOT DISTINCT FROM OLD.category_id)
+     ) THEN
+    NEW.category_id := NULL;
+    SELECT c.id INTO NEW.category_id
+    FROM public.categories c
+    WHERE lower(c.name) = lower(btrim(NEW.category))
+      AND (c.user_id IS NULL OR c.user_id = NEW.user_id)
+    ORDER BY c.user_id NULLS FIRST
+    LIMIT 1;
+  END IF;
+
   SELECT c.name INTO v_name
   FROM public.categories c
   WHERE c.id = NEW.category_id
