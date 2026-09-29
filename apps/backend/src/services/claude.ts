@@ -15,12 +15,13 @@ export const RECEIPT_CATEGORIES = [
 
 export type ReceiptCategory = (typeof RECEIPT_CATEGORIES)[number];
 
-const RECEIPT_SCHEMA = {
+export const RECEIPT_SCHEMA = {
   type: 'object',
   properties: {
     merchant: { type: 'string' },
     total: { type: 'number' },
-    date: { type: 'string' },
+    // ISO calendar date, or null when no date is legible on the receipt.
+    date: { anyOf: [{ type: 'string', format: 'date' }, { type: 'null' }] },
     items: {
       type: 'array',
       items: {
@@ -39,10 +40,20 @@ const RECEIPT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+export const RECEIPT_PROMPT = [
+  'Analyze this receipt image and return JSON only: merchant, total, date, and items (name, amount, category).',
+  `Each item's category must be one of: ${RECEIPT_CATEGORIES.join(', ')}. Use "Other" when nothing else fits.`,
+  'Return date as an ISO 8601 calendar date: YYYY-MM-DD.',
+  'Receipts are usually Israeli and print dates day-first (DD/MM/YYYY, DD.MM.YYYY or DD/MM/YY),',
+  'so read 17/08/2026 as 17 August 2026 and return "2026-08-17"; a two-digit year YY means 20YY.',
+  'If no date is visible on the receipt, return null for date. Never guess a date.',
+].join(' ');
+
 export interface ReceiptExtraction {
   merchant: string;
   total: number;
-  date: string;
+  /** ISO "YYYY-MM-DD", or null when the receipt shows no legible date. */
+  date: string | null;
   items: { name: string; amount: number; category: ReceiptCategory }[];
 }
 
@@ -75,7 +86,7 @@ export async function scanReceipt(
           },
           {
             type: 'text',
-            text: `Analyze this receipt image and return JSON only: merchant, total, date, and items (name, amount, category). Each item's category must be one of: ${RECEIPT_CATEGORIES.join(', ')}. Use "Other" when nothing else fits.`,
+            text: RECEIPT_PROMPT,
           },
         ],
       },

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { supabase } from '@smartbudget/shared/lib/supabase';
-import { scanReceipt } from '../services/claude';
+import { scanReceipt, RECEIPT_CATEGORIES } from '../services/claude';
+import { normalizeReceiptDate } from '../services/receiptDate';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
 
 const router = Router();
@@ -43,9 +44,13 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
       mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
     );
 
+    // Defense in depth: the prompt asks for ISO, but a day-first date copied
+    // off the receipt must never reach the DB (clients can't place it in a month).
+    const rawResponse = { ...extraction, date: normalizeReceiptDate(extraction.date) };
+
     const { data, error } = await supabase
       .from('receipts')
-      .insert({ user_id: req.userId, raw_response: extraction, claude_usage: usage })
+      .insert({ user_id: req.userId, raw_response: rawResponse, claude_usage: usage })
       .select()
       .single();
 
@@ -116,18 +121,60 @@ router.get('/', requireAuth, async (req: AuthedRequest, res: Response) => {
   return res.status(200).json({ receipts: data });
 });
 
-interface UpdateReceiptRequest {
-  merchant?: string;
-  total?: number;
-  date?: string;
+interface ItemCategoryUpdate {
+  index: number;
+  category: string;
 }
 
-// PATCH /api/v1/receipts/:id — correct a scanned receipt before/after confirming
-router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
-  const { merchant, total, date } = req.body as UpdateReceiptRequest;
+const UPDATE_FIELDS = new Set(['merchant', 'total', 'date', 'items']);
+const ITEM_UPDATE_FIELDS = new Set(['index', 'category']);
+const VALID_CATEGORIES = new Set<string>(RECEIPT_CATEGORIES);
 
-  if (merchant === undefined && total === undefined && date === undefined) {
-    return res.status(400).json({ error: 'Provide at least one of: merchant, total, date', status: 400 });
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Validates the shape of `items` (range is checked later, against the stored receipt). */
+function itemUpdatesError(items: unknown): string | null {
+  if (!Array.isArray(items) || items.length === 0) {
+    return 'items must be a non-empty array of { index, category }';
+  }
+  const seen = new Set<number>();
+  for (const entry of items) {
+    if (!isPlainObject(entry)) return 'items must be a non-empty array of { index, category }';
+    const unknown = Object.keys(entry).filter((key) => !ITEM_UPDATE_FIELDS.has(key));
+    if (unknown.length > 0) return `Unknown item field(s): ${unknown.join(', ')}`;
+    const { index, category } = entry;
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+      return 'Each item index must be a non-negative integer';
+    }
+    if (typeof category !== 'string' || !VALID_CATEGORIES.has(category)) {
+      return `Each item category must be one of: ${RECEIPT_CATEGORIES.join(', ')}`;
+    }
+    if (seen.has(index)) return `Duplicate item index: ${index}`;
+    seen.add(index);
+  }
+  return null;
+}
+
+// PATCH /api/v1/receipts/:id — correct a scanned receipt before/after confirming.
+// Body (all optional, at least one): merchant, total, date (ISO or day-first,
+// stored as ISO), items: [{ index, category }] to re-categorize line items.
+router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
+  const body: unknown = req.body;
+  if (!isPlainObject(body)) {
+    return res.status(400).json({ error: 'Provide at least one of: merchant, total, date, items', status: 400 });
+  }
+
+  const unknownFields = Object.keys(body).filter((key) => !UPDATE_FIELDS.has(key));
+  if (unknownFields.length > 0) {
+    return res.status(400).json({ error: `Unknown field(s): ${unknownFields.join(', ')}`, status: 400 });
+  }
+
+  const { merchant, total, date, items } = body;
+
+  if (merchant === undefined && total === undefined && date === undefined && items === undefined) {
+    return res.status(400).json({ error: 'Provide at least one of: merchant, total, date, items', status: 400 });
   }
   if (merchant !== undefined && (typeof merchant !== 'string' || !merchant.trim())) {
     return res.status(400).json({ error: 'merchant must be a non-empty string', status: 400 });
@@ -135,9 +182,18 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
   if (total !== undefined && (typeof total !== 'number' || !(total > 0))) {
     return res.status(400).json({ error: 'total must be a positive number', status: 400 });
   }
-  if (date !== undefined && typeof date !== 'string') {
-    return res.status(400).json({ error: 'date must be a string', status: 400 });
+  let normalizedDate: string | null = null;
+  if (date !== undefined) {
+    normalizedDate = normalizeReceiptDate(date);
+    if (normalizedDate === null) {
+      return res.status(400).json({ error: 'date must be a valid date (YYYY-MM-DD or DD/MM/YYYY)', status: 400 });
+    }
   }
+  if (items !== undefined) {
+    const itemsError = itemUpdatesError(items);
+    if (itemsError) return res.status(400).json({ error: itemsError, status: 400 });
+  }
+  const itemUpdates = items as ItemCategoryUpdate[] | undefined;
 
   const { data: existing, error: fetchError } = await supabase
     .from('receipts')
@@ -150,11 +206,28 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
     return res.status(404).json({ error: 'Receipt not found', status: 404 });
   }
 
+  const existingItems: unknown[] = Array.isArray(existing.raw_response?.items) ? existing.raw_response.items : [];
+  let updatedItems: unknown[] | undefined;
+  if (itemUpdates) {
+    const outOfRange = itemUpdates.find((update) => update.index >= existingItems.length);
+    if (outOfRange) {
+      return res.status(400).json({
+        error: `Item index ${outOfRange.index} is out of range (receipt has ${existingItems.length} item(s))`,
+        status: 400,
+      });
+    }
+    updatedItems = [...existingItems];
+    for (const { index, category } of itemUpdates) {
+      updatedItems[index] = { ...(existingItems[index] as Record<string, unknown>), category };
+    }
+  }
+
   const updatedRawResponse = {
     ...existing.raw_response,
     ...(merchant !== undefined && { merchant }),
     ...(total !== undefined && { total }),
-    ...(date !== undefined && { date }),
+    ...(date !== undefined && { date: normalizedDate }),
+    ...(updatedItems !== undefined && { items: updatedItems }),
   };
 
   const { data, error } = await supabase

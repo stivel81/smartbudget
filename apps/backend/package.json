@@ -24,7 +24,8 @@
     "verify:rate-limit-violations": "ts-node -r dotenv/config scripts/verify-rate-limit-violations.ts",
     "verify:admin-failed-scans": "ts-node -r dotenv/config scripts/verify-admin-failed-scans.ts",
     "verify:admin-audit-log-view": "ts-node -r dotenv/config scripts/verify-admin-audit-log-view.ts",
-    "verify:rls": "ts-node -r dotenv/config scripts/verify-rls.ts"
+    "verify:rls": "ts-node -r dotenv/config scripts/verify-rls.ts",
+    "normalize:receipt-dates": "ts-node -r dotenv/config scripts/normalize-receipt-dates.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
