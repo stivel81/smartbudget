@@ -1,0 +1,223 @@
+# Profile -> Categories (Manage categories screen).
+# Checks the 6 locked built-in rows, then adds, renames and deletes a custom
+# category. Self-cleaning: removes leftovers from a crashed earlier run first,
+# and deletes what it creates, so the account ends unchanged.
+appId: host.exp.Exponent
+name: Manage categories
+tags:
+  - categories
+---
+- runFlow: common/ensure-logged-in.yaml
+
+# --- 1. Open the screen; built-in rows are locked -------------------------
+- tapOn: "Profile, tab.*"
+- extendedWaitUntil:
+    visible:
+      id: "profile-menu-categories"
+    timeout: 15000
+- tapOn:
+    id: "profile-menu-categories"
+- extendedWaitUntil:
+    visible:
+      id: "categories-screen"
+    timeout: 15000
+- assertVisible:
+    id: "categories-back-button"
+- extendedWaitUntil:
+    visible:
+      id: "category-item-Groceries"
+    timeout: 15000
+- assertVisible:
+    id: "category-base-lock-Groceries"
+- assertVisible:
+    id: "category-item-Dining"
+- assertVisible:
+    id: "category-base-lock-Dining"
+- assertVisible:
+    id: "category-item-Transport"
+- assertVisible:
+    id: "category-base-lock-Transport"
+- assertVisible:
+    id: "category-item-Entertainment"
+- assertVisible:
+    id: "category-base-lock-Entertainment"
+- assertVisible:
+    id: "category-item-Health"
+- assertVisible:
+    id: "category-base-lock-Health"
+- assertVisible:
+    id: "category-item-Other"
+- assertVisible:
+    id: "category-base-lock-Other"
+- assertNotVisible:
+    id: "category-edit-Groceries"
+- assertNotVisible:
+    id: "category-delete-Groceries"
+# The custom list has finished loading (either rows or the empty state).
+- extendedWaitUntil:
+    notVisible:
+      id: "categories-loading"
+    timeout: 15000
+
+# --- 2. Clean up leftovers from a crashed earlier run ---------------------
+- runFlow:
+    when:
+      visible:
+        id: "category-delete-E2E Pets"
+    commands:
+      - tapOn:
+          id: "category-delete-E2E Pets"
+      - extendedWaitUntil:
+          visible: "Delete E2E Pets\\?"
+          timeout: 10000
+      - tapOn:
+          text: "Delete"
+          rightOf: "Cancel"
+      - extendedWaitUntil:
+          notVisible:
+            id: "category-item-E2E Pets"
+          timeout: 15000
+- runFlow:
+    when:
+      visible:
+        id: "category-delete-E2E Pet Care"
+    commands:
+      - tapOn:
+          id: "category-delete-E2E Pet Care"
+      - extendedWaitUntil:
+          visible: "Delete E2E Pet Care\\?"
+          timeout: 10000
+      - tapOn:
+          text: "Delete"
+          rightOf: "Cancel"
+      - extendedWaitUntil:
+          notVisible:
+            id: "category-item-E2E Pet Care"
+          timeout: 15000
+
+# --- 3. Add "E2E Pets" with an icon and a color ---------------------------
+- scrollUntilVisible:
+    element:
+      id: "categories-add-button"
+    direction: DOWN
+- tapOn:
+    id: "categories-add-button"
+- extendedWaitUntil:
+    visible:
+      id: "category-name-input"
+    timeout: 10000
+- assertVisible: "New category"
+# Pick icon and color before typing, while the keyboard is still down.
+- tapOn:
+    id: "category-icon-option-paw"
+- tapOn:
+    id: "category-color-option-DB2777"
+- tapOn:
+    id: "category-name-input"
+- inputText: "E2E Pets"
+- assertVisible:
+    id: "category-name-input"
+    text: "E2E Pets"
+- tapOn:
+    id: "category-save-button"
+- extendedWaitUntil:
+    notVisible:
+      id: "category-editor"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "category-item-E2E Pets"
+    timeout: 15000
+- assertVisible:
+    id: "category-edit-E2E Pets"
+- assertVisible:
+    id: "category-delete-E2E Pets"
+
+# --- 4. A name that clashes with a built-in one is rejected inline --------
+- scrollUntilVisible:
+    element:
+      id: "categories-add-button"
+    direction: DOWN
+- tapOn:
+    id: "categories-add-button"
+- extendedWaitUntil:
+    visible:
+      id: "category-name-input"
+    timeout: 10000
+- tapOn:
+    id: "category-name-input"
+- inputText: "groceries"
+- assertVisible:
+    id: "category-name-input"
+    text: "groceries"
+- tapOn:
+    id: "category-save-button"
+- extendedWaitUntil:
+    visible:
+      id: "category-editor-error"
+      text: "A category with that name already exists"
+    timeout: 10000
+- tapOn:
+    id: "category-cancel-button"
+- extendedWaitUntil:
+    notVisible:
+      id: "category-editor"
+    timeout: 10000
+# (No "category-item-groceries is not visible" check: Maestro matches ids
+# case-insensitively, so it would hit the built-in Groceries row.)
+
+# --- 5. Rename "E2E Pets" -> "E2E Pet Care" -------------------------------
+- tapOn:
+    id: "category-edit-E2E Pets"
+- extendedWaitUntil:
+    visible:
+      id: "category-name-input"
+      text: "E2E Pets"
+    timeout: 10000
+- assertVisible: "Edit category"
+- tapOn:
+    id: "category-name-input"
+- eraseText: 20
+- inputText: "E2E Pet Care"
+- assertVisible:
+    id: "category-name-input"
+    text: "E2E Pet Care"
+- tapOn:
+    id: "category-save-button"
+- extendedWaitUntil:
+    notVisible:
+      id: "category-editor"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "category-item-E2E Pet Care"
+    timeout: 15000
+- assertNotVisible:
+    id: "category-item-E2E Pets"
+
+# --- 6. Delete "E2E Pet Care" (confirm in the native Alert) ---------------
+- tapOn:
+    id: "category-delete-E2E Pet Care"
+- extendedWaitUntil:
+    visible: "Delete E2E Pet Care\\?"
+    timeout: 10000
+- assertVisible: "Items in E2E Pet Care will move to Other.*"
+- tapOn:
+    text: "Delete"
+    rightOf: "Cancel"
+- extendedWaitUntil:
+    notVisible:
+      id: "category-item-E2E Pet Care"
+    timeout: 15000
+- assertVisible:
+    id: "category-item-Other"
+
+# --- 7. Back to Profile ---------------------------------------------------
+- tapOn:
+    id: "categories-back-button"
+- extendedWaitUntil:
+    visible:
+      id: "profile-menu-categories"
+    timeout: 10000
+- assertNotVisible:
+    id: "categories-screen"
