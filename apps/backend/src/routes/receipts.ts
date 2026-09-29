@@ -3,6 +3,7 @@ import { supabase } from '@smartbudget/shared/lib/supabase';
 import { scanReceipt, RECEIPT_CATEGORIES } from '../services/claude';
 import { normalizeReceiptDate } from '../services/receiptDate';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
+import { findDuplicateReceipt } from '../services/duplicateReceipt';
 
 const router = Router();
 
@@ -68,7 +69,7 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
 
     if (uploadError) {
       console.error('Failed to upload receipt image:', uploadError);
-      return res.status(201).json({ receipt: data });
+      return res.status(201).json({ receipt: data, duplicate_of: await findDuplicateReceipt(req.userId!, data) });
     }
 
     const { data: updated, error: updateError } = await supabase
@@ -80,10 +81,11 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
 
     if (updateError) {
       console.error('Failed to save receipt image path:', updateError);
-      return res.status(201).json({ receipt: data });
+      return res.status(201).json({ receipt: data, duplicate_of: await findDuplicateReceipt(req.userId!, data) });
     }
 
-    return res.status(201).json({ receipt: updated });
+    // Advisory only: findDuplicateReceipt never throws and returns null on failure.
+    return res.status(201).json({ receipt: updated, duplicate_of: await findDuplicateReceipt(req.userId!, updated) });
   } catch (err) {
     console.error('Receipt scan error:', err);
 
@@ -243,7 +245,9 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
     return res.status(500).json({ error: 'Failed to update receipt', status: 500 });
   }
 
-  return res.status(200).json({ receipt: data });
+  // Recomputed after the edit: fixing the merchant/total/date can create or
+  // clear a match. Advisory only — never fails the save.
+  return res.status(200).json({ receipt: data, duplicate_of: await findDuplicateReceipt(req.userId!, data) });
 });
 
 // GET /api/v1/receipts/:id/image-url
