@@ -1,7 +1,13 @@
 import { Router, Response } from 'express';
 import { supabase } from '@smartbudget/shared/lib/supabase';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
-import { categoryKey, findBaseCategory, findBaseCategoryById, isUuid } from '../services/categories';
+import {
+  BASE_CATEGORY_ROWS,
+  CategoryRow,
+  fetchOwnCustomCategories,
+  findCategoryForUser,
+  isUuid,
+} from '../services/categories';
 
 const router = Router();
 
@@ -14,32 +20,34 @@ interface UpsertBudgetRequest {
 type ResolvedCategory = { id: string; name: string };
 
 /**
- * Resolves the budget's category from a name (case-insensitive) and/or an
- * id: base categories without a DB call, otherwise the caller's own custom
- * categories. Another user's category is never found. When both are given
- * they must name the same category.
+ * Resolves the budget's category from a name (case-insensitive, via the
+ * shared findCategoryForUser) and/or an id: base categories without a DB
+ * call, otherwise the caller's own custom categories. Another user's
+ * category is never found. When both are given they must name the same
+ * category.
  */
 async function resolveBudgetCategory(
   userId: string,
   name: string | undefined,
   id: string | undefined
 ): Promise<{ category: ResolvedCategory } | { error: string; status: number }> {
-  const byName = name !== undefined ? findBaseCategory(name) : null;
-  const byId = id !== undefined ? findBaseCategoryById(id) : null;
+  const findById = (categories: readonly CategoryRow[], wanted: string) =>
+    categories.find((c) => (c.user_id === null || c.user_id === userId) && c.id.toLowerCase() === wanted.toLowerCase()) ?? null;
 
-  let fromName: ResolvedCategory | null = byName;
-  let fromId: ResolvedCategory | null = byId;
-
-  if ((name !== undefined && !fromName) || (id !== undefined && !fromId)) {
-    const { data, error } = await supabase.from('categories').select('id, name').eq('user_id', userId);
-    if (error) {
+  let categories: readonly CategoryRow[] = BASE_CATEGORY_ROWS;
+  const needsCustom =
+    (name !== undefined && !findCategoryForUser(name, userId, categories)) || (id !== undefined && !findById(categories, id));
+  if (needsCustom) {
+    const { data, error } = await fetchOwnCustomCategories(userId);
+    if (error || !data) {
       console.error('Failed to load categories for budget:', error);
       return { error: 'Failed to save budget', status: 500 };
     }
-    const own = (data ?? []) as ResolvedCategory[];
-    if (name !== undefined && !fromName) fromName = own.find((c) => c.name.toLowerCase() === categoryKey(name)) ?? null;
-    if (id !== undefined && !fromId) fromId = own.find((c) => c.id.toLowerCase() === id.toLowerCase()) ?? null;
+    categories = [...BASE_CATEGORY_ROWS, ...data];
   }
+
+  const fromName = name !== undefined ? findCategoryForUser(name, userId, categories) : null;
+  const fromId = id !== undefined ? findById(categories, id) : null;
 
   if ((name !== undefined && !fromName) || (id !== undefined && !fromId)) {
     return { error: 'Unknown category', status: 400 };
@@ -47,7 +55,8 @@ async function resolveBudgetCategory(
   if (fromName && fromId && fromName.id !== fromId.id) {
     return { error: 'category and category_id refer to different categories', status: 400 };
   }
-  return { category: (fromId ?? fromName)! };
+  const chosen = (fromId ?? fromName)!;
+  return { category: { id: chosen.id, name: chosen.name } };
 }
 
 // GET /api/v1/budgets

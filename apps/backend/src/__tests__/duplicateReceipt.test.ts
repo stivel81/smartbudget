@@ -228,6 +228,7 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
   }
 
   it('returns the matching earlier receipt', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null }); // insert
     queueStorageResult({ error: null }); // upload
     queueResult({ data: SAVED, error: null }); // update image_path
@@ -239,13 +240,14 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
     expect(response.body.receipt.id).toBe('receipt-new');
     expect(response.body.duplicate_of).toEqual({ id: 'older', merchant: 'test store ', date: '2026-01-01', total: 10 });
 
-    const lookup = (supabase.from as jest.Mock).mock.results[2].value;
+    const lookup = (supabase.from as jest.Mock).mock.results[3].value;
     expect(lookup.eq).toHaveBeenCalledWith('user_id', 'user-123');
     expect(lookup.eq).toHaveBeenCalledWith('raw_response->>date', '2026-01-01');
     expect(lookup.neq).toHaveBeenCalledWith('id', 'receipt-new');
   });
 
   it('returns duplicate_of: null when there is no match', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueStorageResult({ error: null });
     queueResult({ data: SAVED, error: null });
@@ -258,10 +260,11 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
   });
 
   it("does not report another user's identical receipt", async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueStorageResult({ error: null });
     queueResult({ data: SAVED, error: null });
-    nextFromIsTableAfter(2, [SAVED, row('theirs', {}, { user_id: 'user-999' })]);
+    nextFromIsTableAfter(3, [SAVED, row('theirs', {}, { user_id: 'user-999' })]);
 
     const response = await scan();
 
@@ -270,6 +273,7 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
   });
 
   it('still returns 201 with duplicate_of: null when the lookup fails', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueStorageResult({ error: null });
     queueResult({ data: SAVED, error: null });
@@ -286,6 +290,7 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
   });
 
   it('still returns 201 with duplicate_of: null when the lookup throws', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueStorageResult({ error: null });
     queueResult({ data: SAVED, error: null });
@@ -298,6 +303,7 @@ describe('POST /api/v1/receipts/scan — duplicate_of', () => {
   });
 
   it('includes duplicate_of when the image upload fails', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueStorageResult({ error: { message: 'storage down' } });
     queueResult({ data: [row('older')], error: null });

@@ -80,6 +80,7 @@ function patch(body: object) {
 
 describe('POST /api/v1/receipts/scan keeps transactions in sync', () => {
   it('replaces the new receipt\'s transactions from the saved raw_response', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null }); // receipt insert
     queueResult({ data: CATEGORIES, error: null }); // sync: categories
     queueResult({ error: null }); // sync: delete
@@ -102,6 +103,7 @@ describe('POST /api/v1/receipts/scan keeps transactions in sync', () => {
   });
 
   it('still returns 201 with the same body when the sync insert fails (failure is logged)', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueResult({ data: CATEGORIES, error: null });
     queueResult({ error: null });
@@ -118,6 +120,7 @@ describe('POST /api/v1/receipts/scan keeps transactions in sync', () => {
   });
 
   it('still returns 201 when the sync blows up before any query resolves', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAVED, error: null });
     queueResult({ data: null, error: { message: 'categories down' } }); // sync aborts here
     queueStorageResult({ error: null });
@@ -132,12 +135,13 @@ describe('POST /api/v1/receipts/scan keeps transactions in sync', () => {
   });
 
   it('does not sync when the receipt insert itself fails', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: null, error: { message: 'insert failed' } });
 
     const response = await scan();
 
     expect(response.status).toBe(500);
-    expect(buildersFor('categories')).toHaveLength(0);
+    expect(buildersFor('categories')).toHaveLength(1); // the prompt lookup only — no sync
     expect(buildersFor('transactions')).toHaveLength(0);
   });
 });

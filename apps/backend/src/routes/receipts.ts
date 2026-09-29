@@ -5,6 +5,7 @@ import { normalizeReceiptDate } from '../services/receiptDate';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
 import { findDuplicateReceipt } from '../services/duplicateReceipt';
 import { syncReceiptTransactions } from '../services/transactionSync';
+import { findCategoryForUser, loadUserCategoriesOrBase, resolveCategoryNames } from '../services/categories';
 
 const router = Router();
 
@@ -41,14 +42,31 @@ router.post('/scan', requireAuth, async (req: AuthedRequest, res: Response) => {
   }
 
   try {
+    // Base + this user's custom categories for the prompt. Never throws:
+    // on a lookup failure it logs and falls back to base only.
+    const categories = await loadUserCategoriesOrBase(req.userId!, 'Receipt scan');
+    const customNames = categories.filter((c) => c.user_id === req.userId).map((c) => c.name);
+
     const { extraction, usage } = await scanReceipt(
       image,
-      mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+      mediaType as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif',
+      customNames
     );
 
     // Defense in depth: the prompt asks for ISO, but a day-first date copied
     // off the receipt must never reach the DB (clients can't place it in a month).
-    const rawResponse = { ...extraction, date: normalizeReceiptDate(extraction.date) };
+    // Item categories are canonicalized (case-insensitive) to a base or this
+    // user's custom name; anything else becomes "Other".
+    const rawResponse = {
+      ...extraction,
+      date: normalizeReceiptDate(extraction.date),
+      ...(Array.isArray(extraction.items) && {
+        items: extraction.items.map((item) => ({
+          ...item,
+          category: findCategoryForUser(item?.category, req.userId!, categories)?.name ?? 'Other',
+        })),
+      }),
+    };
 
     const { data, error } = await supabase
       .from('receipts')
@@ -135,7 +153,6 @@ interface ItemCategoryUpdate {
 
 const UPDATE_FIELDS = new Set(['merchant', 'total', 'date', 'items']);
 const ITEM_UPDATE_FIELDS = new Set(['index', 'category']);
-const VALID_CATEGORIES = new Set<string>(RECEIPT_CATEGORIES);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -155,8 +172,9 @@ function itemUpdatesError(items: unknown): string | null {
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
       return 'Each item index must be a non-negative integer';
     }
-    if (typeof category !== 'string' || !VALID_CATEGORIES.has(category)) {
-      return `Each item category must be one of: ${RECEIPT_CATEGORIES.join(', ')}`;
+    // Whether the name exists is checked later, against this user's categories.
+    if (typeof category !== 'string' || !category.trim()) {
+      return 'Each item category must be a non-empty string';
     }
     if (seen.has(index)) return `Duplicate item index: ${index}`;
     seen.add(index);
@@ -200,7 +218,25 @@ router.patch('/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
     const itemsError = itemUpdatesError(items);
     if (itemsError) return res.status(400).json({ error: itemsError, status: 400 });
   }
-  const itemUpdates = items as ItemCategoryUpdate[] | undefined;
+  let itemUpdates = items as ItemCategoryUpdate[] | undefined;
+
+  // Each category must be a base name or one of THIS user's own custom
+  // names (case-insensitive); the canonical stored name is saved.
+  if (itemUpdates) {
+    const result = await resolveCategoryNames(req.userId!, itemUpdates.map((update) => update.category));
+    if ('error' in result) {
+      console.error('Failed to load categories for receipt update:', result.error);
+      return res.status(500).json({ error: 'Failed to update receipt', status: 500 });
+    }
+    const unknownIndex = result.resolved.findIndex((category) => category === null);
+    if (unknownIndex !== -1) {
+      return res.status(400).json({
+        error: `Unknown category "${itemUpdates[unknownIndex].category}". Use a built-in category (${RECEIPT_CATEGORIES.join(', ')}) or one of your own categories.`,
+        status: 400,
+      });
+    }
+    itemUpdates = itemUpdates.map((update, i) => ({ index: update.index, category: result.resolved[i]!.name }));
+  }
 
   const { data: existing, error: fetchError } = await supabase
     .from('receipts')

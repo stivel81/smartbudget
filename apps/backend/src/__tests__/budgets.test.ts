@@ -80,7 +80,7 @@ describe('POST /api/v1/budgets with categories', () => {
   });
 
   it("accepts the user's own custom category by name", async () => {
-    queueResult({ data: [{ id: PETS_ID, name: 'Pets' }], error: null }); // own categories
+    queueResult({ data: [{ id: PETS_ID, user_id: 'user-123', name: 'Pets' }], error: null }); // own categories
     queueResult({ data: PETS_BUDGET, error: null });
 
     const response = await postBudget({ category: 'pets', monthlyLimit: 80 });
@@ -93,7 +93,7 @@ describe('POST /api/v1/budgets with categories', () => {
   });
 
   it("accepts the user's own custom category by id", async () => {
-    queueResult({ data: [{ id: PETS_ID, name: 'Pets' }], error: null });
+    queueResult({ data: [{ id: PETS_ID, user_id: 'user-123', name: 'Pets' }], error: null });
     queueResult({ data: PETS_BUDGET, error: null });
 
     const response = await postBudget({ category_id: PETS_ID, monthlyLimit: 80 });
@@ -118,6 +118,23 @@ describe('POST /api/v1/budgets with categories', () => {
     queueResult({ data: [], error: null }); // own categories: none
     const response = await postBudget({ category_id: 'cccccccc-0000-4000-8000-00000000000b', monthlyLimit: 1 });
     expect(response).toMatchObject({ status: 400, body: { error: 'Unknown category', status: 400 } });
+    expect(buildersFor('budgets')).toHaveLength(0);
+  });
+
+  it("returns 400 for another user's custom category by name", async () => {
+    queueResult({ data: [], error: null }); // own categories: none (the DB filter hides theirs)
+    const response = await postBudget({ category: 'Casino', monthlyLimit: 1 });
+    expect(response).toMatchObject({ status: 400, body: { error: 'Unknown category', status: 400 } });
+    expect(buildersFor('categories')[0].eq).toHaveBeenCalledWith('user_id', 'user-123');
+    expect(buildersFor('budgets')).toHaveLength(0);
+  });
+
+  it("ignores another user's category even if its row slips through the lookup (name and id)", async () => {
+    const theirs = { id: 'dddddddd-0000-4000-8000-00000000000b', user_id: 'user-999', name: 'Casino' };
+    queueResult({ data: [theirs], error: null });
+    expect((await postBudget({ category: 'Casino', monthlyLimit: 1 })).status).toBe(400);
+    queueResult({ data: [theirs], error: null });
+    expect((await postBudget({ category_id: theirs.id, monthlyLimit: 1 })).status).toBe(400);
     expect(buildersFor('budgets')).toHaveLength(0);
   });
 

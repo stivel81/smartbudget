@@ -81,6 +81,11 @@ export function validateCategoryName(input: unknown): { name: string } | { error
   return { name };
 }
 
+/** The 6 base categories as rows (user_id NULL) — no DB call needed. */
+export const BASE_CATEGORY_ROWS: readonly CategoryRow[] = Object.freeze(
+  (Object.keys(BASE_CATEGORY_IDS) as BaseCategoryName[]).map((name) => ({ id: BASE_CATEGORY_IDS[name], user_id: null, name }))
+);
+
 /** Base categories plus the user's own custom ones (id, user_id, name). */
 export async function fetchUserCategories(userId: string): Promise<{ data: CategoryRow[] | null; error: unknown }> {
   const { data, error } = await supabase
@@ -91,18 +96,75 @@ export async function fetchUserCategories(userId: string): Promise<{ data: Categ
 }
 
 /**
- * Maps an item category name to a category id for `userId`: a base
- * category first, then the user's own custom category (both trimmed and
- * case-insensitive), otherwise base "Other". Categories belonging to any
- * other user are ignored even if present in `categories`.
+ * Only the user's own custom categories. Rows are re-checked against
+ * `userId` after the query (defense in depth: another user's row can never
+ * come back from here even if the filter were wrong).
+ */
+export async function fetchOwnCustomCategories(userId: string): Promise<{ data: CategoryRow[] | null; error: unknown }> {
+  const { data, error } = await supabase.from('categories').select('id, user_id, name').eq('user_id', userId);
+  if (error || !Array.isArray(data)) return { data: null, error: error ?? new Error('categories query returned no rows array') };
+  return { data: (data as CategoryRow[]).filter((c) => c.user_id === userId), error: null };
+}
+
+/**
+ * Base rows plus the user's own custom rows. Never throws: if the custom
+ * rows can't be loaded it logs `context` and falls back to base only.
+ */
+export async function loadUserCategoriesOrBase(userId: string, context: string): Promise<CategoryRow[]> {
+  try {
+    const { data, error } = await fetchOwnCustomCategories(userId);
+    if (error || !data) {
+      console.error(`${context}: failed to load custom categories, using base categories only:`, error);
+      return [...BASE_CATEGORY_ROWS];
+    }
+    return [...BASE_CATEGORY_ROWS, ...data];
+  } catch (err) {
+    console.error(`${context}: failed to load custom categories, using base categories only:`, err);
+    return [...BASE_CATEGORY_ROWS];
+  }
+}
+
+/**
+ * THE category-name resolver for a user: a base category first, then the
+ * user's own custom category (space-trimmed, case-insensitive), returning
+ * the canonical stored row. Categories belonging to any other user are
+ * ignored even if present in `categories`. Null when nothing matches.
+ * Used by PATCH /receipts, the scan normalization, budgets and the
+ * transactions sync — don't reimplement it.
+ */
+export function findCategoryForUser(name: unknown, userId: string, categories: readonly CategoryRow[]): CategoryRow | null {
+  if (typeof name !== 'string') return null;
+  const key = categoryKey(name);
+  if (!key) return null;
+  return (
+    categories.find((c) => c.user_id === null && c.name.toLowerCase() === key) ??
+    categories.find((c) => c.user_id === userId && c.name.toLowerCase() === key) ??
+    null
+  );
+}
+
+/**
+ * Resolves several names for `userId`. Loads the user's custom categories
+ * only when some name isn't a base category. `resolved[i]` is null for an
+ * unknown name; `error` is set only when the lookup itself failed.
+ */
+export async function resolveCategoryNames(
+  userId: string,
+  names: readonly unknown[]
+): Promise<{ resolved: (CategoryRow | null)[] } | { error: unknown }> {
+  let categories: readonly CategoryRow[] = BASE_CATEGORY_ROWS;
+  if (names.some((name) => !findCategoryForUser(name, userId, BASE_CATEGORY_ROWS))) {
+    const { data, error } = await fetchOwnCustomCategories(userId);
+    if (error || !data) return { error };
+    categories = [...BASE_CATEGORY_ROWS, ...data];
+  }
+  return { resolved: names.map((name) => findCategoryForUser(name, userId, categories)) };
+}
+
+/**
+ * Maps an item category name to a category id for `userId` via
+ * findCategoryForUser, otherwise base "Other".
  */
 export function resolveCategoryId(name: unknown, userId: string, categories: readonly CategoryRow[]): string {
-  if (typeof name !== 'string') return OTHER_CATEGORY_ID;
-  const key = categoryKey(name);
-  if (!key) return OTHER_CATEGORY_ID;
-  const base = categories.find((c) => c.user_id === null && c.name.toLowerCase() === key);
-  if (base) return base.id;
-  const custom = categories.find((c) => c.user_id === userId && c.name.toLowerCase() === key);
-  if (custom) return custom.id;
-  return OTHER_CATEGORY_ID;
+  return findCategoryForUser(name, userId, categories)?.id ?? OTHER_CATEGORY_ID;
 }

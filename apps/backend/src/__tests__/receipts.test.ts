@@ -48,6 +48,7 @@ beforeEach(() => {
 
 describe('POST /api/v1/receipts/scan', () => {
   it('scans a receipt, uploads the image, and returns 201 on the happy path', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAMPLE_RECEIPT, error: null }); // insert
     queueStorageResult({ error: null }); // storage upload
     queueResult({ data: { ...SAMPLE_RECEIPT, image_path: 'user-123/receipt-123.jpg' }, error: null }); // update with image_path
@@ -63,6 +64,7 @@ describe('POST /api/v1/receipts/scan', () => {
   });
 
   it("persists Claude's token usage on the receipt row", async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAMPLE_RECEIPT, error: null }); // insert
     queueStorageResult({ error: null }); // storage upload
     queueResult({ data: { ...SAMPLE_RECEIPT, image_path: 'user-123/receipt-123.jpg' }, error: null }); // update
@@ -72,7 +74,7 @@ describe('POST /api/v1/receipts/scan', () => {
       .set('Authorization', 'Bearer valid-token')
       .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
 
-    const insertCall = (supabase.from as jest.Mock).mock.results[0].value.insert as jest.Mock;
+    const insertCall = (supabase.from as jest.Mock).mock.results[1].value.insert as jest.Mock;
     expect(insertCall).toHaveBeenCalledWith({
       user_id: 'user-123',
       raw_response: { merchant: 'Test Store', total: 10, date: '2026-01-01', items: [] },
@@ -82,6 +84,7 @@ describe('POST /api/v1/receipts/scan', () => {
 
   it('logs a scan_failures row and returns 500 when Claude analysis fails', async () => {
     (scanReceipt as jest.Mock).mockRejectedValueOnce(new Error('Claude did not return a parseable receipt extraction'));
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ error: null }); // scan_failures insert
 
     const response = await request(app)
@@ -90,7 +93,7 @@ describe('POST /api/v1/receipts/scan', () => {
       .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
 
     expect(response.status).toBe(500);
-    const insertCall = (supabase.from as jest.Mock).mock.results[0].value.insert as jest.Mock;
+    const insertCall = (supabase.from as jest.Mock).mock.results[1].value.insert as jest.Mock;
     expect(insertCall).toHaveBeenCalledWith({
       user_id: 'user-123',
       error_message: 'Claude did not return a parseable receipt extraction',
@@ -113,6 +116,7 @@ describe('POST /api/v1/receipts/scan', () => {
   });
 
   it('still returns 201 if the image upload fails', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAMPLE_RECEIPT, error: null }); // insert
     queueStorageResult({ error: { message: 'upload failed' } }); // storage upload fails
 
@@ -131,6 +135,7 @@ describe('POST /api/v1/receipts/scan', () => {
         extraction: { merchant: 'טיטניום בע"מ', total: 350, date, items: [{ name: 'כללי', amount: 350, category: 'Other' }] },
         usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: null, cache_read_input_tokens: null },
       });
+      queueResult({ data: [], error: null }); // own custom categories (prompt)
       queueResult({ data: SAMPLE_RECEIPT, error: null }); // insert
       queueStorageResult({ error: null }); // storage upload
       queueResult({ data: SAMPLE_RECEIPT, error: null }); // update with image_path
@@ -141,7 +146,7 @@ describe('POST /api/v1/receipts/scan', () => {
         .send({ image: 'ZmFrZS1pbWFnZS1kYXRh', mediaType: 'image/jpeg' });
       expect(response.status).toBe(201);
 
-      const insert = (supabase.from as jest.Mock).mock.results[0].value.insert as jest.Mock;
+      const insert = (supabase.from as jest.Mock).mock.results[1].value.insert as jest.Mock;
       return insert.mock.calls[0][0].raw_response;
     }
 
@@ -359,19 +364,39 @@ describe('PATCH /api/v1/receipts/:id', () => {
     });
 
     it.each([
-      ['unknown', 'Shopping'],
-      ['wrong case', 'dining'],
       ['empty', ''],
+      ['only spaces', '   '],
       ['not a string', 3],
       ['missing', undefined],
-    ])('returns 400 when a category is %s', async (_label, category) => {
+    ])('returns 400 when a category is %s (validated before any DB read)', async (_label, category) => {
       const response = await patch({ items: [{ index: 0, category }] });
 
       expect(response.status).toBe(400);
-      expect(response.body.error).toBe(
-        'Each item category must be one of: Groceries, Dining, Transport, Entertainment, Health, Other'
-      );
+      expect(response.body.error).toBe('Each item category must be a non-empty string');
       expect(supabase.from).not.toHaveBeenCalled();
+    });
+
+    it('canonicalizes a base category given in the wrong case, without a category lookup', async () => {
+      queueResult({ data: THREE_ITEMS, error: null });
+      queueResult({ data: THREE_ITEMS, error: null });
+
+      expect((await patch({ items: [{ index: 0, category: ' dINING ' }] })).status).toBe(200);
+      expect(savedRawResponse().items[0].category).toBe('Dining');
+      expect((supabase.from as jest.Mock).mock.calls.map((c) => c[0])).not.toContain('categories');
+    });
+
+    it('returns 400 for an unknown category (no base or own custom match), without reading the receipt', async () => {
+      queueResult({ data: [], error: null }); // own custom categories: none
+
+      const response = await patch({ items: [{ index: 0, category: 'Shopping' }] });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error:
+          'Unknown category "Shopping". Use a built-in category (Groceries, Dining, Transport, Entertainment, Health, Other) or one of your own categories.',
+        status: 400,
+      });
+      expect((supabase.from as jest.Mock).mock.calls.map((c) => c[0])).toEqual(['categories']);
     });
 
     it('returns 400 for duplicate indexes', async () => {
@@ -615,6 +640,7 @@ describe('receipts routes — error paths', () => {
   });
 
   it('scan: 500 when the receipt row cannot be saved', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: null, error: { message: 'insert failed' } });
 
     const response = await request(app).post('/api/v1/receipts/scan').set(auth).send({ image: 'ZmFrZQ==', mediaType: 'image/jpeg' });
@@ -624,6 +650,7 @@ describe('receipts routes — error paths', () => {
   });
 
   it('scan: still 201 (without image_path) when saving the image path fails', async () => {
+    queueResult({ data: [], error: null }); // own custom categories (prompt)
     queueResult({ data: SAMPLE_RECEIPT, error: null });
     queueStorageResult({ error: null });
     queueResult({ data: null, error: { message: 'update failed' } });
