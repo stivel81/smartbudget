@@ -27,17 +27,45 @@ function rateLimitHandler(req: Request, res: Response) {
   res.status(429).json({ error: 'Too many requests, please try again later.', status: 429 });
 }
 
-// Brute-force guard on login/signup — keyed by IP, before any auth exists.
+// Brute-force guard on login/signup (the credential-guessing surface) —
+// keyed by IP, before any auth exists. Only those two routes: session
+// upkeep (/refresh, /logout) and the code/email routes have their own
+// budgets, so none of them can lock a user out of signing in or vice versa.
+export const AUTH_LIMIT = 10;
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: AUTH_LIMIT,
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipRateLimit,
   handler: rateLimitHandler,
 });
 
-// Password reset is a stricter, per-route budget on top of authLimiter:
+// Session upkeep: /refresh and /logout, each with its own generous budget.
+// The app renews its access token proactively (~1/hour per device, 60s
+// before expiry), on launch, on return to the foreground when due, and on
+// a 401 — a handful of calls per device per hour, single-flight. 60 per 15
+// min per IP (4/min sustained) leaves room for many devices sharing one
+// public IP (mobile carrier CGNAT, office NAT) each doing that, while still
+// capping abuse. There is no guessing surface to protect: /refresh needs a
+// valid, high-entropy, single-use refresh token, and /logout needs a token
+// too; the limit only bounds load (each call is a Supabase round-trip).
+// A 429 here never signs the app out (lib/session.ts treats it as
+// transient and retries with backoff).
+export const SESSION_LIMIT = 60;
+const sessionLimiter = () =>
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: SESSION_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipRateLimit,
+    handler: rateLimitHandler,
+  });
+export const refreshLimiter = sessionLimiter();
+export const logoutLimiter = sessionLimiter();
+
+// Password reset is a stricter, per-route budget (not shared with login):
 // forgot-password sends email (spam/cost vector) and reset-password
 // guesses a 6-digit code (brute-force vector). Separate instances so
 // requesting codes can't exhaust the budget for redeeming one, and so
@@ -113,14 +141,18 @@ app.get('/api/v1/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', version: '1.0.0' });
 });
 
-// Auth routes (password reset/change and signup confirmation get their own
-// tighter limits first)
+// Auth routes: every route has exactly one per-IP budget — login/signup
+// share authLimiter; session upkeep and the code/email routes have their own.
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth/signup', authLimiter);
+app.use('/api/v1/auth/refresh', refreshLimiter);
+app.use('/api/v1/auth/logout', logoutLimiter);
 app.use('/api/v1/auth/forgot-password', forgotPasswordLimiter);
 app.use('/api/v1/auth/reset-password', resetPasswordLimiter);
 app.use('/api/v1/auth/change-password', changePasswordLimiter);
 app.use('/api/v1/auth/verify-signup', verifySignupLimiter);
 app.use('/api/v1/auth/resend-signup', resendSignupLimiter);
-app.use('/api/v1/auth', authLimiter, authRouter);
+app.use('/api/v1/auth', authRouter);
 
 // Receipt routes (scan hits the Claude API, so it gets its own tighter limit)
 app.use('/api/v1/receipts/scan', scanLimiter);
