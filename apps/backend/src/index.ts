@@ -6,6 +6,7 @@ import { supabase } from '@smartbudget/shared/lib/supabase';
 import authRouter from './routes/auth';
 import receiptsRouter from './routes/receipts';
 import budgetsRouter from './routes/budgets';
+import categoriesRouter from './routes/categories';
 import adminRouter from './routes/admin';
 
 // Skip rate limiting under test by default, so the rest of the Jest suite
@@ -160,6 +161,9 @@ app.use('/api/v1/receipts', receiptsRouter);
 
 // Budget routes
 app.use('/api/v1/budgets', budgetsRouter);
+
+// Category routes (base + the user's own custom categories)
+app.use('/api/v1/categories', categoriesRouter);
 
 // Admin routes (read-only; gated by profiles.is_admin, see requireAdmin)
 app.use('/api/v1/admin', adminRouter);
