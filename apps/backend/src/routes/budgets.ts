@@ -1,13 +1,53 @@
 import { Router, Response } from 'express';
 import { supabase } from '@smartbudget/shared/lib/supabase';
 import { requireAuth, AuthedRequest } from '../middleware/requireAuth';
-import { RECEIPT_CATEGORIES } from '../services/claude';
+import { categoryKey, findBaseCategory, findBaseCategoryById, isUuid } from '../services/categories';
 
 const router = Router();
 
 interface UpsertBudgetRequest {
-  category?: string;
-  monthlyLimit?: number;
+  category?: unknown;
+  category_id?: unknown;
+  monthlyLimit?: unknown;
+}
+
+type ResolvedCategory = { id: string; name: string };
+
+/**
+ * Resolves the budget's category from a name (case-insensitive) and/or an
+ * id: base categories without a DB call, otherwise the caller's own custom
+ * categories. Another user's category is never found. When both are given
+ * they must name the same category.
+ */
+async function resolveBudgetCategory(
+  userId: string,
+  name: string | undefined,
+  id: string | undefined
+): Promise<{ category: ResolvedCategory } | { error: string; status: number }> {
+  const byName = name !== undefined ? findBaseCategory(name) : null;
+  const byId = id !== undefined ? findBaseCategoryById(id) : null;
+
+  let fromName: ResolvedCategory | null = byName;
+  let fromId: ResolvedCategory | null = byId;
+
+  if ((name !== undefined && !fromName) || (id !== undefined && !fromId)) {
+    const { data, error } = await supabase.from('categories').select('id, name').eq('user_id', userId);
+    if (error) {
+      console.error('Failed to load categories for budget:', error);
+      return { error: 'Failed to save budget', status: 500 };
+    }
+    const own = (data ?? []) as ResolvedCategory[];
+    if (name !== undefined && !fromName) fromName = own.find((c) => c.name.toLowerCase() === categoryKey(name)) ?? null;
+    if (id !== undefined && !fromId) fromId = own.find((c) => c.id.toLowerCase() === id.toLowerCase()) ?? null;
+  }
+
+  if ((name !== undefined && !fromName) || (id !== undefined && !fromId)) {
+    return { error: 'Unknown category', status: 400 };
+  }
+  if (fromName && fromId && fromName.id !== fromId.id) {
+    return { error: 'category and category_id refer to different categories', status: 400 };
+  }
+  return { category: (fromId ?? fromName)! };
 }
 
 // GET /api/v1/budgets
@@ -26,26 +66,43 @@ router.get('/', requireAuth, async (req: AuthedRequest, res: Response) => {
   return res.status(200).json({ budgets: data });
 });
 
-// POST /api/v1/budgets — create or update the limit for a category
+// POST /api/v1/budgets — create or update the limit for a category.
+// Body: { category (name) and/or category_id, monthlyLimit }. Both columns
+// are always written (the DB also derives `category` from category_id).
 router.post('/', requireAuth, async (req: AuthedRequest, res: Response) => {
-  const { category, monthlyLimit } = req.body as UpsertBudgetRequest;
+  const { category, category_id: categoryId, monthlyLimit } = (req.body ?? {}) as UpsertBudgetRequest;
 
-  if (!category || !(RECEIPT_CATEGORIES as readonly string[]).includes(category)) {
-    return res.status(400).json({
-      error: `Missing or invalid category. Must be one of: ${RECEIPT_CATEGORIES.join(', ')}`,
-      status: 400,
-    });
+  if (category === undefined && categoryId === undefined) {
+    return res.status(400).json({ error: 'Provide category (name) or category_id', status: 400 });
   }
-
-  if (typeof monthlyLimit !== 'number' || !(monthlyLimit > 0)) {
+  if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
+    return res.status(400).json({ error: 'category must be a non-empty string', status: 400 });
+  }
+  if (categoryId !== undefined && !isUuid(categoryId)) {
+    return res.status(400).json({ error: 'category_id must be a UUID', status: 400 });
+  }
+  if (typeof monthlyLimit !== 'number' || !(monthlyLimit > 0) || !Number.isFinite(monthlyLimit)) {
     return res.status(400).json({ error: 'monthlyLimit must be a positive number', status: 400 });
   }
+
+  const resolved = await resolveBudgetCategory(
+    req.userId!,
+    category as string | undefined,
+    categoryId as string | undefined
+  );
+  if ('error' in resolved) return res.status(resolved.status).json({ error: resolved.error, status: resolved.status });
 
   const { data, error } = await supabase
     .from('budgets')
     .upsert(
-      { user_id: req.userId, category, monthly_limit: monthlyLimit, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id,category' }
+      {
+        user_id: req.userId,
+        category: resolved.category.name,
+        category_id: resolved.category.id,
+        monthly_limit: monthlyLimit,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,category_id' }
     )
     .select()
     .single();
