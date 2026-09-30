@@ -1,0 +1,60 @@
+# Build context for apps/backend/Dockerfile and apps/admin/Dockerfile
+# (both built from the repo root: `docker build -f apps/<app>/Dockerfile .`).
+#
+# ALLOWLIST: deny everything, then re-include only what the images need.
+# A new file (a key, a .env variant, a dump) is excluded unless someone
+# deliberately allowlists it. The deny rules at the bottom win over the
+# allowlist (last match wins) as a second lock for secrets and build junk.
+
+*
+
+# --- workspace root: manifests + lockfile only
+!package.json
+!package-lock.json
+
+# --- packages/shared (compiled into the backend image)
+!packages/shared/package.json
+!packages/shared/tsconfig.json
+!packages/shared/tsconfig.build.json
+!packages/shared/lib
+!packages/shared/src
+
+# --- apps/backend
+!apps/backend/package.json
+!apps/backend/tsconfig.json
+!apps/backend/tsconfig.build.json
+!apps/backend/src
+
+# --- apps/admin
+!apps/admin/package.json
+!apps/admin/tsconfig.json
+!apps/admin/next.config.js
+!apps/admin/next-env.d.ts
+!apps/admin/app
+!apps/admin/lib
+!apps/admin/public
+
+# --- always excluded, even inside allowlisted paths
+**/.env
+**/.env.*
+**/*.env
+**/.npmrc
+**/*.pem
+**/*.key
+**/*.p8
+**/*.p12
+**/*.jks
+**/service-account*.json
+**/node_modules
+**/dist
+**/coverage
+**/.next
+**/.swc
+**/*.tsbuildinfo
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/testUtils
+**/.maestro
+**/.git
+**/.DS_Store

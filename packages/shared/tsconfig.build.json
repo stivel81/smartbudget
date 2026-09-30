@@ -1,0 +1,14 @@
+{
+  // Compiles the shared package (lib/ + src/) to plain CommonJS for the
+  // backend container. Dev and Jest keep consuming the .ts sources directly
+  // (ts-node / ts-jest); only the Docker image uses this output, laid out
+  // at the same relative paths so '@smartbudget/shared/lib/supabase'
+  // resolves to lib/supabase.js at runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": false
+  },
+  "include": ["lib", "src"]
+}

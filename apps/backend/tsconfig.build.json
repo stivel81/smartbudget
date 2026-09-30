@@ -1,0 +1,6 @@
+{
+  // Production build (npm run build / Dockerfile): emits dist/ without the
+  // Jest tests and test utilities.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/__tests__", "src/testUtils", "src/**/*.test.ts"]
+}
