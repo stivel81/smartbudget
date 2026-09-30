@@ -14,6 +14,9 @@
  *   clash with base names; a user can still manage their own custom rows
  * - transactions (migration 20260929100200): read own only, no client writes
  * - delete_custom_category() is not callable by clients
+ * - rate_limit_counters (migration 20260929120000): no client can read or
+ *   write it, and rate_limit_increment/decrement/reset() are service-role
+ *   only (while the service role itself can use them)
  */
 process.env.NODE_ENV = 'test';
 
@@ -96,7 +99,7 @@ async function main() {
 
     // --- Signed out: nothing is readable.
     const anon = anonClient();
-    for (const table of ['profiles', 'receipts', 'budgets', 'categories', 'transactions', 'admin_audit_log', 'rate_limit_violations', 'scan_failures']) {
+    for (const table of ['profiles', 'receipts', 'budgets', 'categories', 'transactions', 'admin_audit_log', 'rate_limit_violations', 'scan_failures', 'rate_limit_counters']) {
       const { data } = await anon.from(table).select('*').limit(1);
       check((data ?? []).length === 0, `anon reads nothing from ${table}`, `anon can read ${table}`);
     }
@@ -121,7 +124,7 @@ async function main() {
       'user sees only own profile',
       `user sees profiles: ${JSON.stringify(profiles)}`
     );
-    for (const table of ['admin_audit_log', 'rate_limit_violations', 'scan_failures']) {
+    for (const table of ['admin_audit_log', 'rate_limit_violations', 'scan_failures', 'rate_limit_counters']) {
       const { data } = await asA.from(table).select('*').limit(1);
       check((data ?? []).length === 0, `user reads nothing from ${table}`, `user can read ${table}`);
     }
@@ -237,6 +240,45 @@ async function main() {
       "user can't update or delete transactions",
       `user changed transactions: ${JSON.stringify(aTx)}`
     );
+
+    // --- rate_limit_counters: backend-only (service role via RPC).
+    const rlKey = `verify-rls:${stamp}`;
+    const { data: rlSeed, error: rlSeedError } = await supabase.rpc('rate_limit_increment', { p_key: rlKey, p_window_ms: 60_000 });
+    const rlSeedRow = Array.isArray(rlSeed) ? rlSeed[0] : rlSeed;
+    check(
+      !rlSeedError && rlSeedRow?.total_hits === 1,
+      'service role can call rate_limit_increment',
+      `service role rate_limit_increment failed: ${JSON.stringify(rlSeedError ?? rlSeed)}`
+    );
+    for (const [label, client] of [
+      ['anon', anon],
+      ['user', asA],
+    ] as const) {
+      const { data: rlRead } = await client.from('rate_limit_counters').select('*').eq('key', rlKey);
+      check((rlRead ?? []).length === 0, `${label} can't read rate_limit_counters`, `${label} read rate_limit_counters`);
+
+      const { error: rlInsert } = await client
+        .from('rate_limit_counters')
+        .insert({ key: `${rlKey}:${label}`, hits: 0, reset_at: new Date(Date.now() + 60_000).toISOString() });
+      check(!!rlInsert, `${label} can't insert into rate_limit_counters`, `${label} inserted into rate_limit_counters`);
+
+      await client.from('rate_limit_counters').update({ hits: 0 }).eq('key', rlKey);
+      await client.from('rate_limit_counters').delete().eq('key', rlKey);
+
+      for (const [fn, args] of [
+        ['rate_limit_increment', { p_key: rlKey, p_window_ms: 60_000 }],
+        ['rate_limit_decrement', { p_key: rlKey }],
+        ['rate_limit_reset', { p_key: rlKey }],
+      ] as const) {
+        const { error } = await client.rpc(fn, args);
+        check(!!error, `${label} can't call ${fn}`, `${label} called ${fn}`);
+      }
+    }
+    const { data: rlAfter } = await supabase.from('rate_limit_counters').select('hits').eq('key', rlKey).maybeSingle();
+    check(rlAfter?.hits === 1, "clients couldn't change a rate-limit counter", `rate-limit counter changed by a client: ${JSON.stringify(rlAfter)}`);
+    const { data: rlStray } = await supabase.from('rate_limit_counters').select('key').like('key', `${rlKey}:%`);
+    check((rlStray ?? []).length === 0, 'no client-inserted rate-limit rows exist', `client-inserted rate-limit rows: ${JSON.stringify(rlStray)}`);
+    await supabase.rpc('rate_limit_reset', { p_key: rlKey });
   } finally {
     await supabase.auth.admin.deleteUser(idA);
     await supabase.auth.admin.deleteUser(idB);
